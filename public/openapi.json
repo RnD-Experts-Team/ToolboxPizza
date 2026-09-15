@@ -1,0 +1,275 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "ToolboxPizza API",
+    "version": "1.0.0",
+    "description": "Self-service break tracking. A work day runs cutoff-to-cutoff UTC (06:00 by default) and a break belongs to the day it STARTED in, whole, even when it ends after the next cutoff. The daily limit is soft: breaks keep running past it and the overage is reported. The only actor is a User, who sets their own allowance and milestone thresholds.\n\nNOTE: GET /breaks/active and GET /breaks/day (current day only) evaluate milestones and can therefore WRITE rows. Do not prefetch, HEAD-probe or CDN-cache them."
+  },
+  "servers": [{ "url": "/api/v1" }],
+  "security": [{ "bearerAuth": [] }],
+  "tags": [
+    { "name": "Breaks", "description": "Timing, correcting and annotating breaks" },
+    { "name": "Settings", "description": "The user's own allowance and milestone thresholds" },
+    { "name": "Catalog", "description": "The seeded break-type catalog" },
+    { "name": "System", "description": "Health" }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": ["System"],
+        "summary": "Liveness, plus the user the token resolved to",
+        "responses": { "200": { "description": "OK" }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" } }
+      }
+    },
+    "/break-types": {
+      "get": {
+        "tags": ["Catalog"],
+        "summary": "The break picker, in display order",
+        "description": "`group` is how a client blocks and headers the list; `counts_toward_limit` is the arithmetic. Read the boolean, never the group, when explaining a total.",
+        "responses": {
+          "200": {
+            "description": "Active types",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "data": { "type": "array", "items": { "$ref": "#/components/schemas/BreakType" } } } } } }
+          }
+        }
+      }
+    },
+    "/break-settings": {
+      "get": {
+        "tags": ["Settings"],
+        "summary": "The user's allowance and thresholds",
+        "description": "Creates the settings row from the configured default on first read, so a client never needs a setup step.",
+        "responses": { "200": { "$ref": "#/components/responses/Settings" } }
+      },
+      "post": {
+        "tags": ["Settings"],
+        "summary": "Set the daily allowance",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "required": ["daily_allowance_minutes"], "properties": { "daily_allowance_minutes": { "type": "integer", "minimum": 1, "maximum": 1440, "example": 50 } } } } }
+        },
+        "responses": { "200": { "$ref": "#/components/responses/Settings" }, "422": { "$ref": "#/components/responses/ValidationError" } }
+      }
+    },
+    "/break-milestones": {
+      "get": {
+        "tags": ["Settings"],
+        "summary": "Thresholds in minutes used, ascending",
+        "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "type": "object", "properties": { "data": { "type": "array", "items": { "type": "integer" }, "example": [20, 40, 50] } } } } } } }
+      },
+      "post": {
+        "tags": ["Settings"],
+        "summary": "Replace the whole set of thresholds",
+        "description": "Whole-list replacement, so the client never has to diff. Duplicates are collapsed and the list is sorted. An empty array turns milestones off. A threshold above the allowance is allowed - the limit is soft, so \"tell me at 70\" is meaningful against a 50-minute budget.",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "required": ["thresholds"], "properties": { "thresholds": { "type": "array", "items": { "type": "integer", "minimum": 1, "maximum": 1440 }, "example": [20, 40, 50] } } } } }
+        },
+        "responses": { "200": { "description": "The stored set" }, "422": { "$ref": "#/components/responses/ValidationError" } }
+      }
+    },
+    "/break-milestones/{milestoneId}": {
+      "delete": {
+        "tags": ["Settings"],
+        "summary": "Remove one threshold",
+        "parameters": [{ "name": "milestoneId", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "responses": { "204": { "description": "Deleted" }, "404": { "$ref": "#/components/responses/NotFound" } }
+      }
+    },
+    "/breaks/active": {
+      "get": {
+        "tags": ["Breaks"],
+        "summary": "The running break, or null",
+        "description": "Also EVALUATES MILESTONES for the current work day - a client polling this to tick its timer is what notices a crossing. `belongs_to_previous_work_day` is true when the break started before the cutoff that has since passed.",
+        "responses": { "200": { "description": "The running break, or data: null" } }
+      }
+    },
+    "/breaks/start": {
+      "post": {
+        "tags": ["Breaks"],
+        "summary": "Start timing a break now",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "required": ["break_type_id"], "properties": { "break_type_id": { "type": "integer" }, "other_label": { "type": "string", "maxLength": 120, "description": "Required iff the chosen type has requires_custom_label; rejected otherwise." } } } } }
+        },
+        "responses": { "201": { "$ref": "#/components/responses/BreakEntry" }, "409": { "$ref": "#/components/responses/DomainConflict" }, "422": { "$ref": "#/components/responses/DomainConflict" } }
+      }
+    },
+    "/breaks/{breakId}/stop": {
+      "post": {
+        "tags": ["Breaks"],
+        "summary": "End the running break",
+        "parameters": [{ "$ref": "#/components/parameters/breakId" }],
+        "responses": { "200": { "$ref": "#/components/responses/BreakEntry" }, "404": { "$ref": "#/components/responses/NotFound" }, "409": { "$ref": "#/components/responses/DomainConflict" } }
+      }
+    },
+    "/breaks": {
+      "get": {
+        "tags": ["Breaks"],
+        "summary": "Paginated history",
+        "parameters": [
+          { "name": "from", "in": "query", "schema": { "type": "string", "format": "date" }, "description": "WORK date, not calendar date." },
+          { "name": "to", "in": "query", "schema": { "type": "string", "format": "date" } },
+          { "name": "source", "in": "query", "schema": { "type": "string", "enum": ["timer", "manual"] } },
+          { "name": "counts_toward_limit", "in": "query", "schema": { "type": "boolean" } },
+          { "name": "break_type_ids", "in": "query", "schema": { "type": "array", "items": { "type": "integer" } } },
+          { "name": "per_page", "in": "query", "schema": { "type": "integer", "default": 25, "maximum": 200 } }
+        ],
+        "responses": { "200": { "description": "A Laravel paginator of break entries" } }
+      },
+      "post": {
+        "tags": ["Breaks"],
+        "summary": "Record a break the user forgot to time",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "required": ["break_type_id", "started_at", "ended_at"], "properties": { "break_type_id": { "type": "integer" }, "other_label": { "type": "string", "maxLength": 120 }, "started_at": { "type": "string", "format": "date-time" }, "ended_at": { "type": "string", "format": "date-time" } } } } }
+        },
+        "responses": { "201": { "$ref": "#/components/responses/BreakEntry" }, "409": { "$ref": "#/components/responses/DomainConflict" }, "422": { "$ref": "#/components/responses/DomainConflict" } }
+      }
+    },
+    "/breaks/{breakId}": {
+      "get": {
+        "tags": ["Breaks"],
+        "summary": "One break, with its notes",
+        "parameters": [{ "$ref": "#/components/parameters/breakId" }],
+        "responses": { "200": { "$ref": "#/components/responses/BreakEntry" }, "404": { "$ref": "#/components/responses/NotFound" } }
+      },
+      "post": {
+        "tags": ["Breaks"],
+        "summary": "Correct a break",
+        "description": "POST, not PUT/PATCH - the house convention. Overwrites in place; there is no revision history. Send `ended_at: null` to reopen a break; omit the key to leave the end alone. Moving `started_at` across a cutoff recomputes `work_date`.",
+        "parameters": [{ "$ref": "#/components/parameters/breakId" }],
+        "requestBody": {
+          "content": { "application/json": { "schema": { "type": "object", "properties": { "break_type_id": { "type": "integer" }, "other_label": { "type": ["string", "null"], "maxLength": 120 }, "started_at": { "type": "string", "format": "date-time" }, "ended_at": { "type": ["string", "null"], "format": "date-time" } } } } }
+        },
+        "responses": { "200": { "$ref": "#/components/responses/BreakEntry" }, "404": { "$ref": "#/components/responses/NotFound" }, "409": { "$ref": "#/components/responses/DomainConflict" }, "422": { "$ref": "#/components/responses/DomainConflict" } }
+      },
+      "delete": {
+        "tags": ["Breaks"],
+        "summary": "Delete a break and its notes",
+        "parameters": [{ "$ref": "#/components/parameters/breakId" }],
+        "responses": { "204": { "description": "Deleted" }, "404": { "$ref": "#/components/responses/NotFound" } }
+      }
+    },
+    "/breaks/{breakId}/notes": {
+      "post": {
+        "tags": ["Breaks"],
+        "summary": "Annotate a break",
+        "description": "Allowed while the break is running and at any point afterwards, for as long as the entry is retained.",
+        "parameters": [{ "$ref": "#/components/parameters/breakId" }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["body"], "properties": { "body": { "type": "string", "maxLength": 2000 } } } } } },
+        "responses": { "201": { "description": "The stored note" }, "404": { "$ref": "#/components/responses/NotFound" }, "422": { "$ref": "#/components/responses/ValidationError" } }
+      }
+    },
+    "/breaks/day": {
+      "get": {
+        "tags": ["Breaks"],
+        "summary": "The day breakdown",
+        "description": "Defaults to the current work day. Evaluates milestones ONLY when the requested date is the current work day - a historical day is strictly read-only. A day with no breaks returns zeros, not a 404.",
+        "parameters": [{ "$ref": "#/components/parameters/date" }],
+        "responses": { "200": { "description": "The breakdown", "content": { "application/json": { "schema": { "type": "object", "properties": { "data": { "$ref": "#/components/schemas/DaySummary" } } } } } } }
+      }
+    },
+    "/breaks/day/export": {
+      "get": {
+        "tags": ["Breaks"],
+        "summary": "The day breakdown plus a paste-ready text rendering",
+        "description": "Same payload as /breaks/day plus `data.text`. A separate endpoint because /breaks/day is the polled one and should not render a document on every tick.",
+        "parameters": [{ "$ref": "#/components/parameters/date" }],
+        "responses": { "200": { "description": "The breakdown, with `text`" } }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "A pizzasys user token. Verified on every request; there is no local login. An employee-subject token is refused outright - employees are a different id space."
+      }
+    },
+    "parameters": {
+      "breakId": { "name": "breakId", "in": "path", "required": true, "schema": { "type": "integer" }, "description": "Another user's break answers 404, never 403." },
+      "date": { "name": "date", "in": "query", "required": false, "schema": { "type": "string", "format": "date" }, "description": "A WORK date. Defaults to the current work day." }
+    },
+    "schemas": {
+      "BreakType": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "slug": { "type": "string", "example": "coffee_break" },
+          "name": { "type": "string", "example": "Coffee break" },
+          "group": { "type": "string", "enum": ["regular", "special"] },
+          "group_label": { "type": "string" },
+          "counts_toward_limit": { "type": "boolean" },
+          "requires_custom_label": { "type": "boolean", "description": "True only for \"Custom / Other\", which needs other_label on the entry." },
+          "sort_order": { "type": "integer" }
+        }
+      },
+      "BreakEntry": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "break_type": { "type": "object" },
+          "other_label": { "type": ["string", "null"] },
+          "label": { "type": "string", "description": "other_label when present, else the type name - so clients never branch on the catalog-or-free-text split." },
+          "started_at": { "type": "string", "format": "date-time" },
+          "ended_at": { "type": ["string", "null"], "format": "date-time", "description": "null means the break is running." },
+          "running": { "type": "boolean" },
+          "work_date": { "type": "string", "format": "date" },
+          "duration_seconds": { "type": "integer", "description": "Elapsed-so-far for a running break." },
+          "duration_minutes": { "type": "integer", "description": "Floored. Entry minutes need not sum to the day total." },
+          "counts_toward_limit": { "type": "boolean", "description": "A snapshot taken at write time, not a live catalog join." },
+          "source": { "type": "string", "enum": ["timer", "manual"], "description": "Entry ORIGIN, not an edit trail." },
+          "notes": { "type": "array", "items": { "type": "object" } }
+        }
+      },
+      "DaySummary": {
+        "type": "object",
+        "properties": {
+          "work_date": { "type": "string", "format": "date" },
+          "work_day": { "type": "object", "properties": { "starts_at": { "type": "string" }, "ends_at": { "type": "string" }, "cutoff_hour": { "type": "integer" }, "timezone": { "type": "string" } } },
+          "user": { "type": "object" },
+          "allowance_minutes": { "type": "integer" },
+          "counted_seconds": { "type": "integer" },
+          "counted_minutes": { "type": "integer" },
+          "excluded_seconds": { "type": "integer" },
+          "excluded_minutes": { "type": "integer" },
+          "total_seconds": { "type": "integer" },
+          "total_minutes": { "type": "integer" },
+          "remaining_minutes": { "type": "integer" },
+          "over_minutes": { "type": "integer" },
+          "over_limit": { "type": "boolean" },
+          "entry_count": { "type": "integer" },
+          "has_active_break": { "type": "boolean" },
+          "as_of": { "type": "string", "format": "date-time" },
+          "generated_at": { "type": "string", "format": "date-time" },
+          "self_reported": { "type": "boolean", "description": "Always true. Breaks are editable in place with no revision history, so this document is what the user says happened - not evidence." },
+          "categories": { "type": "array", "items": { "type": "object" } },
+          "entries": { "type": "array", "items": { "$ref": "#/components/schemas/BreakEntry" } },
+          "milestones": { "type": "object", "properties": { "thresholds": { "type": "array", "items": { "type": "integer" } }, "fired": { "type": "array", "items": { "type": "object" } }, "pending": { "type": "array", "items": { "type": "integer" } } } },
+          "text": { "type": "string", "description": "Export endpoint only." }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "message": { "type": "string" },
+          "error": { "type": "object", "properties": { "code": { "type": "string" } }, "additionalProperties": true }
+        }
+      }
+    },
+    "responses": {
+      "Settings": { "description": "Allowance, thresholds and the work-day config" },
+      "BreakEntry": { "description": "A break entry", "content": { "application/json": { "schema": { "type": "object", "properties": { "data": { "$ref": "#/components/schemas/BreakEntry" } } } } } },
+      "Unauthorized": { "description": "No token, an inactive token, or a user that has not replicated yet" },
+      "Forbidden": { "description": "pizzasys returned ext.authorized=false, or the token is not a user subject" },
+      "NotFound": { "description": "No such break for this user. 404 rather than 403, so ids cannot be probed." },
+      "ValidationError": { "description": "Laravel validation errors" },
+      "DomainConflict": {
+        "description": "A domain rule refused the change. `error.code` is the contract: ALREADY_ON_BREAK, BREAK_OVERLAP (carries error.conflicts), BREAK_NOT_RUNNING, BREAK_ENDS_BEFORE_START, BREAK_STARTS_IN_FUTURE, BREAK_OUTSIDE_RETENTION_WINDOW, BREAK_CUSTOM_LABEL_REQUIRED, BREAK_CUSTOM_LABEL_NOT_ALLOWED, BREAK_TYPE_INACTIVE.",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+      }
+    }
+  }
+}
