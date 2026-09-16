@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\HasAttachments;
 use Database\Factories\NoteFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -16,7 +17,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 class Note extends Model
 {
     /** @use HasFactory<NoteFactory> */
-    use HasFactory, SoftDeletes;
+    use HasAttachments, HasFactory, SoftDeletes;
 
     protected $fillable = [
         'notable_type',

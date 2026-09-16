@@ -3,6 +3,7 @@
 namespace App\Exceptions\Renderers;
 
 use App\Services\Breaks\Exceptions\BreakException;
+use App\Services\Tickets\Exceptions\TicketException;
 use Illuminate\Http\JsonResponse;
 use Throwable;
 
@@ -17,6 +18,13 @@ class ToolboxExceptionRenderer
     public function render(Throwable $e): ?JsonResponse
     {
         if ($e instanceof BreakException) {
+            return response()->json([
+                'message' => $e->getMessage(),
+                'error' => ['code' => $e->errorCode] + $e->context,
+            ], $e->statusCode);
+        }
+
+        if ($e instanceof TicketException) {
             return response()->json([
                 'message' => $e->getMessage(),
                 'error' => ['code' => $e->errorCode] + $e->context,

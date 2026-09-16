@@ -44,6 +44,12 @@
              the break tests assert domain behaviour without also asserting
              wire traffic; BreakBroadcastTest flips it on for itself. -->
         <env name="TOOLBOX_REALTIME_ENABLED" value="false"/>
+        <!-- Ticket notifications default ON in production - a ticket nobody is
+             told about is not a ticket - but off here so the domain tests
+             assert behaviour rather than wire traffic. TicketNotifierTest and
+             TicketBroadcastTest flip them on for themselves. -->
+        <env name="TOOLBOX_TICKET_NOTIFICATIONS_ENABLED" value="false"/>
+        <env name="TOOLBOX_TICKET_REALTIME_ENABLED" value="false"/>
         <env name="PULSE_ENABLED" value="false"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
         <env name="NIGHTWATCH_ENABLED" value="false"/>

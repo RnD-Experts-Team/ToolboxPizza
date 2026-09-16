@@ -15,5 +15,9 @@ class DatabaseSeeder extends Seeder
     public function run(): void
     {
         $this->call(BreakTypeSeeder::class);
+
+        // Sections only. Levels and assignments are org structure, not catalog:
+        // seeding them would invent a reporting line nobody agreed to.
+        $this->call(TicketSectionSeeder::class);
     }
 }

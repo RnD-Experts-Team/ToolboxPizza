@@ -7,6 +7,12 @@ use Illuminate\Support\Facades\Schedule;
 // still running. Once a day is pruned it cannot be re-exported.
 Schedule::command('breaks:prune')->dailyAt('07:00')->withoutOverlapping()->onOneServer();
 
+// Attachment files. Three ways a file ends up unreferenced - a deleted row past
+// retention, an owner force-deleted out from under it, and bytes staged for a
+// request that never committed - and this is the only thing that unlinks any of
+// them. 07:15 UTC, fifteen minutes after breaks:prune so the two never contend.
+Schedule::command('attachments:prune')->dailyAt('07:15')->withoutOverlapping()->onOneServer();
+
 // Safety net for the transactional outbox: PublishOutboxEventJob is the primary
 // path, this sweeps up anything the queue lost or never published.
 Schedule::command('outbox:publish-pending')->everyFiveMinutes()->withoutOverlapping();

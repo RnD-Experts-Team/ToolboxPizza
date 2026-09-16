@@ -87,4 +87,60 @@ return [
     'realtime' => [
         'enabled' => (bool) env('TOOLBOX_REALTIME_ENABLED', false),
     ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Tickets
+    |--------------------------------------------------------------------------
+    | Notifications default ON: a ticket nobody is told about is not a ticket,
+    | unlike a break milestone toast. Realtime defaults OFF for the same
+    | deploy-ordering reason as breaks - NotificationsPizza must be carrying
+    | BroadcastSendHandler first or its consumer parks the messages.
+    |
+    | Own flags rather than the break ones, so tickets can ship without also
+    | flipping break toasts.
+    */
+    'tickets' => [
+        'action_url' => env('TOOLBOX_TICKETS_ACTION_URL', '/toolbox/tickets'),
+
+        'notifications' => [
+            'enabled' => (bool) env('TOOLBOX_TICKET_NOTIFICATIONS_ENABLED', true),
+        ],
+
+        'realtime' => [
+            'enabled' => (bool) env('TOOLBOX_TICKET_REALTIME_ENABLED', false),
+        ],
+
+        'attachments' => [
+            // Public, matching MaintenancePizza: files are served straight off
+            // the storage:link symlink and the URL is embedded in the JSON.
+            // That means the BYTES ARE UNAUTHENTICATED - anyone holding the
+            // link reads the file. Recorded per row, so switching this later
+            // does not strand existing files.
+            //
+            // `php artisan storage:link` is a required deploy step.
+            'disk' => env('TOOLBOX_ATTACHMENT_DISK', 'public'),
+
+            'max_kilobytes' => (int) env('TOOLBOX_ATTACHMENT_MAX_KB', 10240),
+            'max_per_request' => (int) env('TOOLBOX_ATTACHMENT_MAX_COUNT', 10),
+
+            // Checked against the SNIFFED type, not the filename. text/html and
+            // image/svg+xml are absent on purpose: both execute script, and on
+            // a publicly-served disk that is stored XSS on our own origin.
+            'allowed_mimetypes' => [
+                'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/heic',
+                'application/pdf', 'text/plain', 'text/csv',
+                'application/msword',
+                'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                'application/vnd.ms-excel',
+                'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                'video/mp4', 'video/quicktime',
+            ],
+
+            // How long a soft-deleted attachment's bytes survive, and how long a
+            // freshly-staged file is protected from the orphan sweep.
+            'retention_days' => (int) env('TOOLBOX_ATTACHMENT_RETENTION_DAYS', 30),
+            'grace_hours' => (int) env('TOOLBOX_ATTACHMENT_GRACE_HOURS', 24),
+        ],
+    ],
 ];

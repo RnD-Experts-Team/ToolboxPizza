@@ -92,21 +92,21 @@ class UserReplicationTest extends TestCase
         $this->assertDatabaseHas('users', ['id' => 4321]);
     }
 
-    public function test_the_router_maps_only_the_auth_user_subjects(): void
+    public function test_the_router_maps_the_user_subjects(): void
     {
         $map = app(EventRouter::class)->getResolvedMap();
 
-        $this->assertSame([
-            'auth.v1.user.created',
-            'auth.v1.user.updated',
-            'auth.v1.user.deleted',
-        ], array_keys($map));
+        foreach (['created', 'updated', 'deleted'] as $verb) {
+            $this->assertArrayHasKey("auth.v1.user.{$verb}", $map);
+        }
     }
 
     public function test_the_router_refuses_a_subject_it_has_no_handler_for(): void
     {
-        $this->expectExceptionMessage("No handler for subject 'auth.v1.store.created'");
+        // Stores and role assignments ARE handled now, so this needs a subject
+        // that genuinely has no handler.
+        $this->expectExceptionMessage("No handler for subject 'hiring.v1.employee.created'");
 
-        app(EventRouter::class)->resolve('auth.v1.store.created');
+        app(EventRouter::class)->resolve('hiring.v1.employee.created');
     }
 }

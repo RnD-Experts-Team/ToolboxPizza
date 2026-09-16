@@ -2,181 +2,2391 @@
   "openapi": "3.1.0",
   "info": {
     "title": "ToolboxPizza API",
-    "version": "1.0.0",
-    "description": "Self-service break tracking. A work day runs cutoff-to-cutoff UTC (06:00 by default) and a break belongs to the day it STARTED in, whole, even when it ends after the next cutoff. The daily limit is soft: breaks keep running past it and the overage is reported. The only actor is a User, who sets their own allowance and milestone thresholds.\n\nNOTE: GET /breaks/active and GET /breaks/day (current day only) evaluate milestones and can therefore WRITE rows. Do not prefetch, HEAD-probe or CDN-cache them."
+    "version": "1.1.0",
+    "description": "Two modules.\n\nBREAKS - self-service break tracking. A work day runs cutoff-to-cutoff UTC (06:00 by default) and a break belongs to the day it STARTED in, whole, even when it ends after the next cutoff. The daily limit is soft: breaks keep running past it and the overage is reported. The only actor is a User, who sets their own allowance and milestone thresholds.\n\nTICKETS - internal ticketing keyed on a SECTION, a stable string the frontend tags each area with. Sections group under LEVELS, levels nest, and an assignment to a level covers every section beneath it. The load-bearing rule: a ticket only reaches someone who has the store, so a person assigned the section but lacking the store is not notified and gets 404 on its URL. Updates are POST, not PUT/PATCH. There are no bulk endpoints.\n\nNOTE: GET /breaks/active and GET /breaks/day (current day only) evaluate milestones and can therefore WRITE rows. Do not prefetch, HEAD-probe or CDN-cache them.\n\nNOTE: attachment bytes are served off the public disk with no bearer token - the one part of this API not covered by ext.authorized."
   },
-  "servers": [{ "url": "/api/v1" }],
-  "security": [{ "bearerAuth": [] }],
+  "servers": [
+    {
+      "url": "/api/v1"
+    }
+  ],
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
   "tags": [
-    { "name": "Breaks", "description": "Timing, correcting and annotating breaks" },
-    { "name": "Settings", "description": "The user's own allowance and milestone thresholds" },
-    { "name": "Catalog", "description": "The seeded break-type catalog" },
-    { "name": "System", "description": "Health" }
+    {
+      "name": "Breaks",
+      "description": "Timing, correcting and annotating breaks"
+    },
+    {
+      "name": "Settings",
+      "description": "The user's own allowance and milestone thresholds"
+    },
+    {
+      "name": "Catalog",
+      "description": "The seeded break-type catalog"
+    },
+    {
+      "name": "System",
+      "description": "Health"
+    },
+    {
+      "name": "Tickets",
+      "description": "Raising, reading and working tickets"
+    },
+    {
+      "name": "Ticket admin",
+      "description": "Sections, levels and assignments - the routing catalog"
+    }
   ],
   "paths": {
     "/health": {
       "get": {
-        "tags": ["System"],
+        "tags": [
+          "System"
+        ],
         "summary": "Liveness, plus the user the token resolved to",
-        "responses": { "200": { "description": "OK" }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" } }
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
       }
     },
     "/break-types": {
       "get": {
-        "tags": ["Catalog"],
+        "tags": [
+          "Catalog"
+        ],
         "summary": "The break picker, in display order",
         "description": "`group` is how a client blocks and headers the list; `counts_toward_limit` is the arithmetic. Read the boolean, never the group, when explaining a total.",
         "responses": {
           "200": {
             "description": "Active types",
-            "content": { "application/json": { "schema": { "type": "object", "properties": { "data": { "type": "array", "items": { "$ref": "#/components/schemas/BreakType" } } } } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/BreakType"
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       }
     },
     "/break-settings": {
       "get": {
-        "tags": ["Settings"],
+        "tags": [
+          "Settings"
+        ],
         "summary": "The user's allowance and thresholds",
         "description": "Creates the settings row from the configured default on first read, so a client never needs a setup step.",
-        "responses": { "200": { "$ref": "#/components/responses/Settings" } }
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Settings"
+          }
+        }
       },
       "post": {
-        "tags": ["Settings"],
+        "tags": [
+          "Settings"
+        ],
         "summary": "Set the daily allowance",
         "requestBody": {
           "required": true,
-          "content": { "application/json": { "schema": { "type": "object", "required": ["daily_allowance_minutes"], "properties": { "daily_allowance_minutes": { "type": "integer", "minimum": 1, "maximum": 1440, "example": 50 } } } } }
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "daily_allowance_minutes"
+                ],
+                "properties": {
+                  "daily_allowance_minutes": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 1440,
+                    "example": 50
+                  }
+                }
+              }
+            }
+          }
         },
-        "responses": { "200": { "$ref": "#/components/responses/Settings" }, "422": { "$ref": "#/components/responses/ValidationError" } }
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Settings"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
+        }
       }
     },
     "/break-milestones": {
       "get": {
-        "tags": ["Settings"],
+        "tags": [
+          "Settings"
+        ],
         "summary": "Thresholds in minutes used, ascending",
-        "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "type": "object", "properties": { "data": { "type": "array", "items": { "type": "integer" }, "example": [20, 40, 50] } } } } } } }
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "integer"
+                      },
+                      "example": [
+                        20,
+                        40,
+                        50
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
       },
       "post": {
-        "tags": ["Settings"],
+        "tags": [
+          "Settings"
+        ],
         "summary": "Replace the whole set of thresholds",
         "description": "Whole-list replacement, so the client never has to diff. Duplicates are collapsed and the list is sorted. An empty array turns milestones off. A threshold above the allowance is allowed - the limit is soft, so \"tell me at 70\" is meaningful against a 50-minute budget.",
         "requestBody": {
           "required": true,
-          "content": { "application/json": { "schema": { "type": "object", "required": ["thresholds"], "properties": { "thresholds": { "type": "array", "items": { "type": "integer", "minimum": 1, "maximum": 1440 }, "example": [20, 40, 50] } } } } }
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "thresholds"
+                ],
+                "properties": {
+                  "thresholds": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 1440
+                    },
+                    "example": [
+                      20,
+                      40,
+                      50
+                    ]
+                  }
+                }
+              }
+            }
+          }
         },
-        "responses": { "200": { "description": "The stored set" }, "422": { "$ref": "#/components/responses/ValidationError" } }
+        "responses": {
+          "200": {
+            "description": "The stored set"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
+        }
       }
     },
     "/break-milestones/{milestoneId}": {
       "delete": {
-        "tags": ["Settings"],
+        "tags": [
+          "Settings"
+        ],
         "summary": "Remove one threshold",
-        "parameters": [{ "name": "milestoneId", "in": "path", "required": true, "schema": { "type": "integer" } }],
-        "responses": { "204": { "description": "Deleted" }, "404": { "$ref": "#/components/responses/NotFound" } }
+        "parameters": [
+          {
+            "name": "milestoneId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
       }
     },
     "/breaks/active": {
       "get": {
-        "tags": ["Breaks"],
+        "tags": [
+          "Breaks"
+        ],
         "summary": "The running break, or null",
         "description": "Also EVALUATES MILESTONES for the current work day - a client polling this to tick its timer is what notices a crossing. `belongs_to_previous_work_day` is true when the break started before the cutoff that has since passed.",
-        "responses": { "200": { "description": "The running break, or data: null" } }
+        "responses": {
+          "200": {
+            "description": "The running break, or data: null"
+          }
+        }
       }
     },
     "/breaks/start": {
       "post": {
-        "tags": ["Breaks"],
+        "tags": [
+          "Breaks"
+        ],
         "summary": "Start timing a break now",
         "requestBody": {
           "required": true,
-          "content": { "application/json": { "schema": { "type": "object", "required": ["break_type_id"], "properties": { "break_type_id": { "type": "integer" }, "other_label": { "type": "string", "maxLength": 120, "description": "Required iff the chosen type has requires_custom_label; rejected otherwise." } } } } }
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "break_type_id"
+                ],
+                "properties": {
+                  "break_type_id": {
+                    "type": "integer"
+                  },
+                  "other_label": {
+                    "type": "string",
+                    "maxLength": 120,
+                    "description": "Required iff the chosen type has requires_custom_label; rejected otherwise."
+                  }
+                }
+              }
+            }
+          }
         },
-        "responses": { "201": { "$ref": "#/components/responses/BreakEntry" }, "409": { "$ref": "#/components/responses/DomainConflict" }, "422": { "$ref": "#/components/responses/DomainConflict" } }
+        "responses": {
+          "201": {
+            "$ref": "#/components/responses/BreakEntry"
+          },
+          "409": {
+            "$ref": "#/components/responses/DomainConflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/DomainConflict"
+          }
+        }
       }
     },
     "/breaks/{breakId}/stop": {
       "post": {
-        "tags": ["Breaks"],
+        "tags": [
+          "Breaks"
+        ],
         "summary": "End the running break",
-        "parameters": [{ "$ref": "#/components/parameters/breakId" }],
-        "responses": { "200": { "$ref": "#/components/responses/BreakEntry" }, "404": { "$ref": "#/components/responses/NotFound" }, "409": { "$ref": "#/components/responses/DomainConflict" } }
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/breakId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/BreakEntry"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/DomainConflict"
+          }
+        }
       }
     },
     "/breaks": {
       "get": {
-        "tags": ["Breaks"],
+        "tags": [
+          "Breaks"
+        ],
         "summary": "Paginated history",
         "parameters": [
-          { "name": "from", "in": "query", "schema": { "type": "string", "format": "date" }, "description": "WORK date, not calendar date." },
-          { "name": "to", "in": "query", "schema": { "type": "string", "format": "date" } },
-          { "name": "source", "in": "query", "schema": { "type": "string", "enum": ["timer", "manual"] } },
-          { "name": "counts_toward_limit", "in": "query", "schema": { "type": "boolean" } },
-          { "name": "break_type_ids", "in": "query", "schema": { "type": "array", "items": { "type": "integer" } } },
-          { "name": "per_page", "in": "query", "schema": { "type": "integer", "default": 25, "maximum": 200 } }
+          {
+            "name": "from",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "description": "WORK date, not calendar date."
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "timer",
+                "manual"
+              ]
+            }
+          },
+          {
+            "name": "counts_toward_limit",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "break_type_ids",
+            "in": "query",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "integer"
+              }
+            }
+          },
+          {
+            "name": "per_page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 25,
+              "maximum": 200
+            }
+          }
         ],
-        "responses": { "200": { "description": "A Laravel paginator of break entries" } }
+        "responses": {
+          "200": {
+            "description": "A Laravel paginator of break entries"
+          }
+        }
       },
       "post": {
-        "tags": ["Breaks"],
+        "tags": [
+          "Breaks"
+        ],
         "summary": "Record a break the user forgot to time",
         "requestBody": {
           "required": true,
-          "content": { "application/json": { "schema": { "type": "object", "required": ["break_type_id", "started_at", "ended_at"], "properties": { "break_type_id": { "type": "integer" }, "other_label": { "type": "string", "maxLength": 120 }, "started_at": { "type": "string", "format": "date-time" }, "ended_at": { "type": "string", "format": "date-time" } } } } }
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "break_type_id",
+                  "started_at",
+                  "ended_at"
+                ],
+                "properties": {
+                  "break_type_id": {
+                    "type": "integer"
+                  },
+                  "other_label": {
+                    "type": "string",
+                    "maxLength": 120
+                  },
+                  "started_at": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "ended_at": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              }
+            }
+          }
         },
-        "responses": { "201": { "$ref": "#/components/responses/BreakEntry" }, "409": { "$ref": "#/components/responses/DomainConflict" }, "422": { "$ref": "#/components/responses/DomainConflict" } }
+        "responses": {
+          "201": {
+            "$ref": "#/components/responses/BreakEntry"
+          },
+          "409": {
+            "$ref": "#/components/responses/DomainConflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/DomainConflict"
+          }
+        }
       }
     },
     "/breaks/{breakId}": {
       "get": {
-        "tags": ["Breaks"],
+        "tags": [
+          "Breaks"
+        ],
         "summary": "One break, with its notes",
-        "parameters": [{ "$ref": "#/components/parameters/breakId" }],
-        "responses": { "200": { "$ref": "#/components/responses/BreakEntry" }, "404": { "$ref": "#/components/responses/NotFound" } }
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/breakId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/BreakEntry"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
       },
       "post": {
-        "tags": ["Breaks"],
+        "tags": [
+          "Breaks"
+        ],
         "summary": "Correct a break",
         "description": "POST, not PUT/PATCH - the house convention. Overwrites in place; there is no revision history. Send `ended_at: null` to reopen a break; omit the key to leave the end alone. Moving `started_at` across a cutoff recomputes `work_date`.",
-        "parameters": [{ "$ref": "#/components/parameters/breakId" }],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/breakId"
+          }
+        ],
         "requestBody": {
-          "content": { "application/json": { "schema": { "type": "object", "properties": { "break_type_id": { "type": "integer" }, "other_label": { "type": ["string", "null"], "maxLength": 120 }, "started_at": { "type": "string", "format": "date-time" }, "ended_at": { "type": ["string", "null"], "format": "date-time" } } } } }
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "break_type_id": {
+                    "type": "integer"
+                  },
+                  "other_label": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 120
+                  },
+                  "started_at": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "ended_at": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "format": "date-time"
+                  }
+                }
+              }
+            }
+          }
         },
-        "responses": { "200": { "$ref": "#/components/responses/BreakEntry" }, "404": { "$ref": "#/components/responses/NotFound" }, "409": { "$ref": "#/components/responses/DomainConflict" }, "422": { "$ref": "#/components/responses/DomainConflict" } }
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/BreakEntry"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/DomainConflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/DomainConflict"
+          }
+        }
       },
       "delete": {
-        "tags": ["Breaks"],
+        "tags": [
+          "Breaks"
+        ],
         "summary": "Delete a break and its notes",
-        "parameters": [{ "$ref": "#/components/parameters/breakId" }],
-        "responses": { "204": { "description": "Deleted" }, "404": { "$ref": "#/components/responses/NotFound" } }
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/breakId"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
       }
     },
     "/breaks/{breakId}/notes": {
       "post": {
-        "tags": ["Breaks"],
+        "tags": [
+          "Breaks"
+        ],
         "summary": "Annotate a break",
         "description": "Allowed while the break is running and at any point afterwards, for as long as the entry is retained.",
-        "parameters": [{ "$ref": "#/components/parameters/breakId" }],
-        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["body"], "properties": { "body": { "type": "string", "maxLength": 2000 } } } } } },
-        "responses": { "201": { "description": "The stored note" }, "404": { "$ref": "#/components/responses/NotFound" }, "422": { "$ref": "#/components/responses/ValidationError" } }
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/breakId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "body"
+                ],
+                "properties": {
+                  "body": {
+                    "type": "string",
+                    "maxLength": 2000
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The stored note"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
+        }
       }
     },
     "/breaks/day": {
       "get": {
-        "tags": ["Breaks"],
+        "tags": [
+          "Breaks"
+        ],
         "summary": "The day breakdown",
         "description": "Defaults to the current work day. Evaluates milestones ONLY when the requested date is the current work day - a historical day is strictly read-only. A day with no breaks returns zeros, not a 404.",
-        "parameters": [{ "$ref": "#/components/parameters/date" }],
-        "responses": { "200": { "description": "The breakdown", "content": { "application/json": { "schema": { "type": "object", "properties": { "data": { "$ref": "#/components/schemas/DaySummary" } } } } } } }
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/date"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The breakdown",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/DaySummary"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/breaks/day/export": {
       "get": {
-        "tags": ["Breaks"],
+        "tags": [
+          "Breaks"
+        ],
         "summary": "The day breakdown plus a paste-ready text rendering",
         "description": "Same payload as /breaks/day plus `data.text`. A separate endpoint because /breaks/day is the polled one and should not render a document on every tick.",
-        "parameters": [{ "$ref": "#/components/parameters/date" }],
-        "responses": { "200": { "description": "The breakdown, with `text`" } }
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/date"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The breakdown, with `text`"
+          }
+        }
+      }
+    },
+    "/tickets": {
+      "get": {
+        "tags": [
+          "Tickets"
+        ],
+        "summary": "The cross-store inbox",
+        "description": "Everything the caller can see, across every store they can see it in.\n\nTHIS ROUTE HAS NO STORE IN THE PATH, so pizzasys makes no per-store decision on it (store_scope_mode = 'none'). ToolboxPizza filters it locally against the replicated user_store_roles - which is the whole reason that table is replicated. Three ways a ticket qualifies: the caller reported it, they are an explicit participant, or the section/level routing reaches them for that store.",
+        "parameters": [
+          {
+            "name": "statuses[]",
+            "in": "query",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "description": "OR within the filter. An unparseable value is dropped silently rather than 422'd."
+          },
+          {
+            "name": "section_keys[]",
+            "in": "query",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "name": "section_ids[]",
+            "in": "query",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "integer"
+              }
+            }
+          },
+          {
+            "name": "reported_by",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Matches title or description."
+          },
+          {
+            "name": "per_page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 25
+            },
+            "description": "Clamped, so a large value cannot pull the whole table."
+          },
+          {
+            "name": "stores[]",
+            "in": "query",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "description": "Store CODES. Narrows what the caller may already see; it can never widen it."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated, most recently active first, id as the tiebreaker",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Ticket"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/stores/{storeId}/tickets": {
+      "get": {
+        "tags": [
+          "Tickets"
+        ],
+        "summary": "One store's tickets",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/storeId"
+          },
+          {
+            "name": "statuses[]",
+            "in": "query",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "description": "OR within the filter. An unparseable value is dropped silently rather than 422'd."
+          },
+          {
+            "name": "section_keys[]",
+            "in": "query",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "name": "section_ids[]",
+            "in": "query",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "integer"
+              }
+            }
+          },
+          {
+            "name": "reported_by",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Matches title or description."
+          },
+          {
+            "name": "per_page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 25
+            },
+            "description": "Clamped, so a large value cannot pull the whole table."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Ticket"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Tickets"
+        ],
+        "summary": "Raise a ticket",
+        "description": "Raised against the store in the PATH; there is no store field in the body.\n\nA ticket reaching nobody is NOT an error: it is created and the response carries data.warnings: [\"no_recipients\"], because refusing it would throw away someone's report over an admin's configuration gap.\n\nFiles are written to disk BEFORE the transaction opens and unlinked if it rolls back, so a failure can never strand bytes.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/storeId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "section_key",
+                  "title",
+                  "description"
+                ],
+                "properties": {
+                  "section_key": {
+                    "type": "string",
+                    "description": "The routing key. Must be an ACTIVE section."
+                  },
+                  "title": {
+                    "type": "string",
+                    "maxLength": 190
+                  },
+                  "description": {
+                    "type": "string",
+                    "maxLength": 20000
+                  },
+                  "participants": {
+                    "type": "array",
+                    "maxItems": 20,
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "user_id": {
+                          "type": "integer"
+                        },
+                        "role": {
+                          "type": "string",
+                          "enum": [
+                            "reader",
+                            "responder",
+                            "assignee"
+                          ]
+                        }
+                      }
+                    },
+                    "description": "The reporter MAY loop people in at creation; adding one later needs the manage-participants ability."
+                  },
+                  "files": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "binary"
+                    },
+                    "description": "Attached to the ticket. Capped per request and checked against a sniffed mime allowlist."
+                  },
+                  "notes": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "type": "string",
+                          "maxLength": 10000
+                        },
+                        "files": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "format": "binary"
+                          }
+                        }
+                      }
+                    },
+                    "description": "PAIRED BY INDEX: notes[0][files][] lands on the first note, never on the ticket."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The new ticket, presented for the caller",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/Ticket"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
+        }
+      }
+    },
+    "/stores/{storeId}/tickets/{ticketId}": {
+      "get": {
+        "tags": [
+          "Tickets"
+        ],
+        "summary": "One ticket, in full",
+        "description": "Responses, notes, attachments and the whole status history.\n\n404, never 403, when the caller has no relationship to it - a 403 would confirm the id exists. A ticket from another store is also 404 here, even for a caller who legitimately holds that other store.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/storeId"
+          },
+          {
+            "$ref": "#/components/parameters/ticketId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The ticket",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/Ticket"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Tickets"
+        ],
+        "summary": "Correct a ticket",
+        "description": "The reporter may edit only while the ticket is still `pending`: once somebody has picked it up, rewriting the description invalidates what they acted on. An assignee may edit at any status.\n\nsection_key RE-ROUTES the ticket to a different audience, so it needs the change-status ability rather than the edit one.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/storeId"
+          },
+          {
+            "$ref": "#/components/parameters/ticketId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [],
+                "properties": {
+                  "title": {
+                    "type": "string",
+                    "maxLength": 190
+                  },
+                  "description": {
+                    "type": "string",
+                    "maxLength": 20000
+                  },
+                  "section_key": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated ticket",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/Ticket"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
+        }
+      }
+    },
+    "/stores/{storeId}/tickets/{ticketId}/status": {
+      "post": {
+        "tags": [
+          "Tickets"
+        ],
+        "summary": "Move a ticket",
+        "description": "Assignees only - the reporter follows and replies but does not decide when their own problem is solved.\n\nAn illegal transition is 409 TICKET_ILLEGAL_TRANSITION carrying `allowed`, and writes no audit row. Moving to the status it is already in is 409 too, rather than an audit row saying nothing happened.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/storeId"
+          },
+          {
+            "$ref": "#/components/parameters/ticketId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "status"
+                ],
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "pending",
+                      "in_progress",
+                      "fixed",
+                      "closed"
+                    ]
+                  },
+                  "reason": {
+                    "type": "string",
+                    "maxLength": 2000
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The audit row that was written",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/TicketStatusChange"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/DomainConflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
+        }
+      }
+    },
+    "/stores/{storeId}/tickets/{ticketId}/reopen": {
+      "post": {
+        "tags": [
+          "Tickets"
+        ],
+        "summary": "Reopen a fixed or closed ticket",
+        "description": "The one edge back out of a terminal state. A REASON IS REQUIRED - reopening says the previous answer was wrong, and the person who gave it needs to know why. Clears fixed_at/closed_at, bumps reopen_count, and the audit row carries is_reopen = true.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/storeId"
+          },
+          {
+            "$ref": "#/components/parameters/ticketId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "reason"
+                ],
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "maxLength": 2000
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The reopen row",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/TicketStatusChange"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/DomainConflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
+        }
+      }
+    },
+    "/stores/{storeId}/tickets/{ticketId}/responses": {
+      "post": {
+        "tags": [
+          "Tickets"
+        ],
+        "summary": "Reply on a ticket",
+        "description": "Readers cannot: that is the difference between a reader and a responder. The first reply stamps first_responded_at once and never again.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/storeId"
+          },
+          {
+            "$ref": "#/components/parameters/ticketId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "body"
+                ],
+                "properties": {
+                  "body": {
+                    "type": "string",
+                    "maxLength": 20000
+                  },
+                  "files": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "binary"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The reply",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/TicketResponse"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
+        }
+      }
+    },
+    "/stores/{storeId}/tickets/{ticketId}/notes": {
+      "post": {
+        "tags": [
+          "Tickets"
+        ],
+        "summary": "Annotate a ticket",
+        "description": "Same authority as replying - a note remarks on the ticket rather than changing it.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/storeId"
+          },
+          {
+            "$ref": "#/components/parameters/ticketId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "body"
+                ],
+                "properties": {
+                  "body": {
+                    "type": "string",
+                    "maxLength": 10000
+                  },
+                  "files": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "binary"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The note",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/Note"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
+        }
+      }
+    },
+    "/stores/{storeId}/tickets/{ticketId}/attachments": {
+      "post": {
+        "tags": [
+          "Tickets"
+        ],
+        "summary": "Attach files to a ticket",
+        "description": "Capped per request, and checked against a SNIFFED mime allowlist - text/html and image/svg+xml are excluded on purpose, because both execute script on a publicly-served origin.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/storeId"
+          },
+          {
+            "$ref": "#/components/parameters/ticketId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "files"
+                ],
+                "properties": {
+                  "files": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "binary"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The stored attachments",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Attachment"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
+        }
+      }
+    },
+    "/stores/{storeId}/tickets/{ticketId}/participants": {
+      "get": {
+        "tags": [
+          "Tickets"
+        ],
+        "summary": "Who was added by hand",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/storeId"
+          },
+          {
+            "$ref": "#/components/parameters/ticketId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Readers, responders and exception assignees",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/TicketParticipant"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Tickets"
+        ],
+        "summary": "Add someone to this ticket",
+        "description": "Assignees only: routing belongs to the people who own the queue, not to the reporter.\n\nRe-adding someone CHANGES THEIR ROLE rather than stacking a second grant. Adding the reporter is 422 TICKET_PARTICIPANT_REDUNDANT - they already read and reply by virtue of reporting, and a row saying so would be a second source of truth.\n\nrole=assignee is the escape hatch: full powers on this one ticket though the section is not theirs.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/storeId"
+          },
+          {
+            "$ref": "#/components/parameters/ticketId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "user_id",
+                  "role"
+                ],
+                "properties": {
+                  "user_id": {
+                    "type": "integer"
+                  },
+                  "role": {
+                    "type": "string",
+                    "enum": [
+                      "reader",
+                      "responder",
+                      "assignee"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The participant row",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/TicketParticipant"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
+        }
+      }
+    },
+    "/stores/{storeId}/tickets/{ticketId}/participants/{userId}": {
+      "delete": {
+        "tags": [
+          "Tickets"
+        ],
+        "summary": "Remove someone from this ticket",
+        "description": "Only removes an explicit row. Somebody the section routing reaches stays reachable - take the assignment away for that.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/storeId"
+          },
+          {
+            "$ref": "#/components/parameters/ticketId"
+          },
+          {
+            "$ref": "#/components/parameters/participantUserId"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Removed"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/stores/{storeId}/tickets/{ticketId}/recipients": {
+      "get": {
+        "tags": [
+          "Tickets"
+        ],
+        "summary": "Who this ticket reaches, and why",
+        "description": "The resolution made observable. `user_ids` is who would actually be notified (section/level routing INTERSECTED with store access); `candidates` is everyone the routing reaches before the store filter, each with `via` naming the section or the level they came through. The difference between the two lists is exactly the people the store rule excluded.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/storeId"
+          },
+          {
+            "$ref": "#/components/parameters/ticketId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Resolved recipients and the candidates behind them",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "user_ids": {
+                          "type": "array",
+                          "items": {
+                            "type": "integer"
+                          }
+                        },
+                        "candidates": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "user_id": {
+                                "type": "integer"
+                              },
+                              "store_scoped": {
+                                "type": "boolean"
+                              },
+                              "via": {
+                                "type": "string",
+                                "example": "level:3"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/ticket-sections": {
+      "get": {
+        "tags": [
+          "Ticket admin"
+        ],
+        "summary": "The section catalog",
+        "parameters": [
+          {
+            "name": "include_inactive",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "Off by default, so the picker only ever sees live rows."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sections in display order",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/TicketSection"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Ticket admin"
+        ],
+        "summary": "Create a section",
+        "description": "The `key` is what the frontend hardcodes, so it is chosen once and never renamed. Display names are free to change.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "key",
+                  "name"
+                ],
+                "properties": {
+                  "key": {
+                    "type": "string",
+                    "maxLength": 100,
+                    "example": "inventory.main-dashboard"
+                  },
+                  "name": {
+                    "type": "string",
+                    "maxLength": 150
+                  },
+                  "description": {
+                    "type": "string",
+                    "maxLength": 1000
+                  },
+                  "display_order": {
+                    "type": "integer"
+                  },
+                  "active": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The section",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/TicketSection"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
+        }
+      }
+    },
+    "/ticket-sections/{sectionId}": {
+      "post": {
+        "tags": [
+          "Ticket admin"
+        ],
+        "summary": "Update a section",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/sectionId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [],
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "display_order": {
+                    "type": "integer"
+                  },
+                  "active": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The section",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/TicketSection"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Ticket admin"
+        ],
+        "summary": "Retire a section",
+        "description": "DEACTIVATES it. Tickets point at these rows forever, so nothing is ever actually deleted.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/sectionId"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Retired"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/ticket-levels": {
+      "get": {
+        "tags": [
+          "Ticket admin"
+        ],
+        "summary": "The level tree",
+        "parameters": [
+          {
+            "name": "include_inactive",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "Off by default, so the picker only ever sees live rows."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Levels",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/TicketLevel"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        },
+        "description": "Always nested - a flat list of levels tells you nothing, since what a level covers is defined by what sits under it."
+      },
+      "post": {
+        "tags": [
+          "Ticket admin"
+        ],
+        "summary": "Create a level",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "key",
+                  "name"
+                ],
+                "properties": {
+                  "key": {
+                    "type": "string",
+                    "maxLength": 100
+                  },
+                  "name": {
+                    "type": "string",
+                    "maxLength": 150
+                  },
+                  "description": {
+                    "type": "string",
+                    "maxLength": 1000
+                  },
+                  "parent_id": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "display_order": {
+                    "type": "integer"
+                  },
+                  "active": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The level",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/TicketLevel"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
+        }
+      }
+    },
+    "/ticket-levels/{levelId}": {
+      "post": {
+        "tags": [
+          "Ticket admin"
+        ],
+        "summary": "Update a level",
+        "description": "Re-parenting is checked against the graph: a parent that is the node itself or any of its descendants is 422 TICKET_LEVEL_CYCLE, carrying the offending `path`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/levelId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [],
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "parent_id": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "display_order": {
+                    "type": "integer"
+                  },
+                  "active": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The level",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/TicketLevel"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Ticket admin"
+        ],
+        "summary": "Retire a level",
+        "description": "Deactivates it, and hands back assignments_affected: HOW MANY PEOPLE STOP RECEIVING. An inactive level severs the chain above it, so deactivating a mid-tree level silently cuts off everyone assigned higher up - this count is there so that is a decision rather than a surprise.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/levelId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The now-inactive level and the blast radius",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "integer"
+                        },
+                        "active": {
+                          "type": "boolean"
+                        },
+                        "assignments_affected": {
+                          "type": "integer"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/ticket-levels/{levelId}/sections": {
+      "post": {
+        "tags": [
+          "Ticket admin"
+        ],
+        "summary": "Set which sections sit under a level",
+        "description": "WHOLE-LIST REPLACE, mirroring break-milestones: [] detaches everything. A section may sit under several levels at once.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/levelId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "section_ids"
+                ],
+                "properties": {
+                  "section_ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The level with its sections",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/TicketLevel"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
+        }
+      }
+    },
+    "/ticket-assignments": {
+      "get": {
+        "tags": [
+          "Ticket admin"
+        ],
+        "summary": "Who receives what",
+        "parameters": [
+          {
+            "name": "user_ids[]",
+            "in": "query",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "integer"
+              }
+            }
+          },
+          {
+            "name": "section_ids[]",
+            "in": "query",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "integer"
+              }
+            }
+          },
+          {
+            "name": "level_ids[]",
+            "in": "query",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "integer"
+              }
+            }
+          },
+          {
+            "name": "per_page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 25
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Assignments",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/TicketAssignment"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Ticket admin"
+        ],
+        "summary": "Assign someone to a section or a level",
+        "description": "EXACTLY ONE of ticket_section_id / ticket_level_id. Neither is 422 TICKET_ASSIGNMENT_TARGET_REQUIRED; both is TICKET_ASSIGNMENT_TARGET_AMBIGUOUS.\n\nstore_scoped is the whole store story: true means 'this section, at the stores they hold', false means 'this section, everywhere'. Stores are never named here.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "user_id"
+                ],
+                "properties": {
+                  "user_id": {
+                    "type": "integer"
+                  },
+                  "ticket_section_id": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "ticket_level_id": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "store_scoped": {
+                    "type": "boolean",
+                    "default": true
+                  },
+                  "active": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The assignment",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/TicketAssignment"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/DomainConflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
+        }
+      }
+    },
+    "/ticket-assignments/{assignmentId}": {
+      "post": {
+        "tags": [
+          "Ticket admin"
+        ],
+        "summary": "Update an assignment",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/assignmentId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [],
+                "properties": {
+                  "store_scoped": {
+                    "type": "boolean"
+                  },
+                  "active": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The assignment",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/TicketAssignment"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Ticket admin"
+        ],
+        "summary": "Remove an assignment",
+        "description": "A REAL delete, unlike sections and levels: an assignment is configuration, not history.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/assignmentId"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Removed"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
       }
     }
   },
@@ -189,86 +2399,845 @@
       }
     },
     "parameters": {
-      "breakId": { "name": "breakId", "in": "path", "required": true, "schema": { "type": "integer" }, "description": "Another user's break answers 404, never 403." },
-      "date": { "name": "date", "in": "query", "required": false, "schema": { "type": "string", "format": "date" }, "description": "A WORK date. Defaults to the current work day." }
+      "breakId": {
+        "name": "breakId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "integer"
+        },
+        "description": "Another user's break answers 404, never 403."
+      },
+      "date": {
+        "name": "date",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "type": "string",
+          "format": "date"
+        },
+        "description": "A WORK date. Defaults to the current work day."
+      },
+      "storeId": {
+        "name": "storeId",
+        "in": "path",
+        "required": true,
+        "description": "The store CODE, not the numeric pk. 404 STORE_NOT_FOUND if it has not replicated here yet.",
+        "schema": {
+          "type": "string",
+          "example": "03795-00001"
+        }
+      },
+      "ticketId": {
+        "name": "ticketId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "integer"
+        }
+      },
+      "sectionId": {
+        "name": "sectionId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "integer"
+        }
+      },
+      "levelId": {
+        "name": "levelId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "integer"
+        }
+      },
+      "assignmentId": {
+        "name": "assignmentId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "integer"
+        }
+      },
+      "participantUserId": {
+        "name": "userId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "integer"
+        }
+      }
     },
     "schemas": {
       "BreakType": {
         "type": "object",
         "properties": {
-          "id": { "type": "integer" },
-          "slug": { "type": "string", "example": "coffee_break" },
-          "name": { "type": "string", "example": "Coffee break" },
-          "group": { "type": "string", "enum": ["regular", "special"] },
-          "group_label": { "type": "string" },
-          "counts_toward_limit": { "type": "boolean" },
-          "requires_custom_label": { "type": "boolean", "description": "True only for \"Custom / Other\", which needs other_label on the entry." },
-          "sort_order": { "type": "integer" }
+          "id": {
+            "type": "integer"
+          },
+          "slug": {
+            "type": "string",
+            "example": "coffee_break"
+          },
+          "name": {
+            "type": "string",
+            "example": "Coffee break"
+          },
+          "group": {
+            "type": "string",
+            "enum": [
+              "regular",
+              "special"
+            ]
+          },
+          "group_label": {
+            "type": "string"
+          },
+          "counts_toward_limit": {
+            "type": "boolean"
+          },
+          "requires_custom_label": {
+            "type": "boolean",
+            "description": "True only for \"Custom / Other\", which needs other_label on the entry."
+          },
+          "sort_order": {
+            "type": "integer"
+          }
         }
       },
       "BreakEntry": {
         "type": "object",
         "properties": {
-          "id": { "type": "integer" },
-          "break_type": { "type": "object" },
-          "other_label": { "type": ["string", "null"] },
-          "label": { "type": "string", "description": "other_label when present, else the type name - so clients never branch on the catalog-or-free-text split." },
-          "started_at": { "type": "string", "format": "date-time" },
-          "ended_at": { "type": ["string", "null"], "format": "date-time", "description": "null means the break is running." },
-          "running": { "type": "boolean" },
-          "work_date": { "type": "string", "format": "date" },
-          "duration_seconds": { "type": "integer", "description": "Elapsed-so-far for a running break." },
-          "duration_minutes": { "type": "integer", "description": "Floored. Entry minutes need not sum to the day total." },
-          "counts_toward_limit": { "type": "boolean", "description": "A snapshot taken at write time, not a live catalog join." },
-          "source": { "type": "string", "enum": ["timer", "manual"], "description": "Entry ORIGIN, not an edit trail." },
-          "notes": { "type": "array", "items": { "type": "object" } }
+          "id": {
+            "type": "integer"
+          },
+          "break_type": {
+            "type": "object"
+          },
+          "other_label": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "label": {
+            "type": "string",
+            "description": "other_label when present, else the type name - so clients never branch on the catalog-or-free-text split."
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "ended_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "null means the break is running."
+          },
+          "running": {
+            "type": "boolean"
+          },
+          "work_date": {
+            "type": "string",
+            "format": "date"
+          },
+          "duration_seconds": {
+            "type": "integer",
+            "description": "Elapsed-so-far for a running break."
+          },
+          "duration_minutes": {
+            "type": "integer",
+            "description": "Floored. Entry minutes need not sum to the day total."
+          },
+          "counts_toward_limit": {
+            "type": "boolean",
+            "description": "A snapshot taken at write time, not a live catalog join."
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "timer",
+              "manual"
+            ],
+            "description": "Entry ORIGIN, not an edit trail."
+          },
+          "notes": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          }
         }
       },
       "DaySummary": {
         "type": "object",
         "properties": {
-          "work_date": { "type": "string", "format": "date" },
-          "work_day": { "type": "object", "properties": { "starts_at": { "type": "string" }, "ends_at": { "type": "string" }, "cutoff_hour": { "type": "integer" }, "timezone": { "type": "string" } } },
-          "user": { "type": "object" },
-          "allowance_minutes": { "type": "integer" },
-          "counted_seconds": { "type": "integer" },
-          "counted_minutes": { "type": "integer" },
-          "excluded_seconds": { "type": "integer" },
-          "excluded_minutes": { "type": "integer" },
-          "total_seconds": { "type": "integer" },
-          "total_minutes": { "type": "integer" },
-          "remaining_minutes": { "type": "integer" },
-          "over_minutes": { "type": "integer" },
-          "over_limit": { "type": "boolean" },
-          "entry_count": { "type": "integer" },
-          "has_active_break": { "type": "boolean" },
-          "as_of": { "type": "string", "format": "date-time" },
-          "generated_at": { "type": "string", "format": "date-time" },
-          "self_reported": { "type": "boolean", "description": "Always true. Breaks are editable in place with no revision history, so this document is what the user says happened - not evidence." },
-          "categories": { "type": "array", "items": { "type": "object" } },
-          "entries": { "type": "array", "items": { "$ref": "#/components/schemas/BreakEntry" } },
-          "milestones": { "type": "object", "properties": { "thresholds": { "type": "array", "items": { "type": "integer" } }, "fired": { "type": "array", "items": { "type": "object" } }, "pending": { "type": "array", "items": { "type": "integer" } } } },
-          "text": { "type": "string", "description": "Export endpoint only." }
+          "work_date": {
+            "type": "string",
+            "format": "date"
+          },
+          "work_day": {
+            "type": "object",
+            "properties": {
+              "starts_at": {
+                "type": "string"
+              },
+              "ends_at": {
+                "type": "string"
+              },
+              "cutoff_hour": {
+                "type": "integer"
+              },
+              "timezone": {
+                "type": "string"
+              }
+            }
+          },
+          "user": {
+            "type": "object"
+          },
+          "allowance_minutes": {
+            "type": "integer"
+          },
+          "counted_seconds": {
+            "type": "integer"
+          },
+          "counted_minutes": {
+            "type": "integer"
+          },
+          "excluded_seconds": {
+            "type": "integer"
+          },
+          "excluded_minutes": {
+            "type": "integer"
+          },
+          "total_seconds": {
+            "type": "integer"
+          },
+          "total_minutes": {
+            "type": "integer"
+          },
+          "remaining_minutes": {
+            "type": "integer"
+          },
+          "over_minutes": {
+            "type": "integer"
+          },
+          "over_limit": {
+            "type": "boolean"
+          },
+          "entry_count": {
+            "type": "integer"
+          },
+          "has_active_break": {
+            "type": "boolean"
+          },
+          "as_of": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "generated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "self_reported": {
+            "type": "boolean",
+            "description": "Always true. Breaks are editable in place with no revision history, so this document is what the user says happened - not evidence."
+          },
+          "categories": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BreakEntry"
+            }
+          },
+          "milestones": {
+            "type": "object",
+            "properties": {
+              "thresholds": {
+                "type": "array",
+                "items": {
+                  "type": "integer"
+                }
+              },
+              "fired": {
+                "type": "array",
+                "items": {
+                  "type": "object"
+                }
+              },
+              "pending": {
+                "type": "array",
+                "items": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "text": {
+            "type": "string",
+            "description": "Export endpoint only."
+          }
         }
       },
       "Error": {
         "type": "object",
         "properties": {
-          "message": { "type": "string" },
-          "error": { "type": "object", "properties": { "code": { "type": "string" } }, "additionalProperties": true }
+          "message": {
+            "type": "string"
+          },
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": true
+          }
+        }
+      },
+      "Attachment": {
+        "type": "object",
+        "description": "Served straight off the public disk via the storage:link symlink. The URL needs no token - anyone holding it reads the file.",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "url": {
+            "type": "string"
+          },
+          "original_name": {
+            "type": "string"
+          },
+          "mime_type": {
+            "type": "string",
+            "description": "SNIFFED, not the client-supplied type."
+          },
+          "size": {
+            "type": "integer"
+          },
+          "created_by": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "creator": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "Note": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "type": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "body": {
+            "type": "string"
+          },
+          "attachments": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/Attachment"
+            }
+          },
+          "created_by": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "TicketParticipant": {
+        "type": "object",
+        "description": "Somebody added to one ticket by hand, independently of the section routing.",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "user": {
+            "type": "object"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "reader",
+              "responder",
+              "assignee"
+            ]
+          },
+          "role_label": {
+            "type": "string"
+          },
+          "added_by": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "TicketResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "body": {
+            "type": "string"
+          },
+          "author": {
+            "type": "object"
+          },
+          "attachments": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/Attachment"
+            }
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "TicketStatusChange": {
+        "type": "object",
+        "description": "One row per transition, including the ticket's own creation (from_status null).",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "from": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "pending",
+              "in_progress",
+              "fixed",
+              "closed",
+              null
+            ]
+          },
+          "to": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "in_progress",
+              "fixed",
+              "closed"
+            ]
+          },
+          "to_label": {
+            "type": "string"
+          },
+          "is_reopen": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_by": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "Ticket": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "in_progress",
+              "fixed",
+              "closed"
+            ]
+          },
+          "status_label": {
+            "type": "string"
+          },
+          "is_terminal": {
+            "type": "boolean"
+          },
+          "allowed_transitions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "What the server would honour from here. Render these as buttons instead of discovering a 409."
+          },
+          "store": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "section": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "reporter": {
+            "type": "object"
+          },
+          "participants": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/TicketParticipant"
+            }
+          },
+          "responses": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/TicketResponse"
+            }
+          },
+          "notes": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/Note"
+            }
+          },
+          "attachments": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/Attachment"
+            }
+          },
+          "status_changes": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/TicketStatusChange"
+            }
+          },
+          "first_responded_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Set once, never rewritten."
+          },
+          "fixed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "closed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "reopened_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "reopen_count": {
+            "type": "integer"
+          },
+          "last_activity_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "The default sort key."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "On creation only. [\"no_recipients\"] means the ticket was stored but the section reaches nobody who has this store."
+          },
+          "viewer": {
+            "type": "object",
+            "description": "THE CALLER'S OWN capabilities. Absent from broadcast payloads, which are viewer-neutral because one envelope reaches many people.",
+            "properties": {
+              "role": {
+                "type": "string",
+                "enum": [
+                  "assignee",
+                  "reporter",
+                  "responder",
+                  "reader",
+                  "none"
+                ]
+              },
+              "role_label": {
+                "type": "string"
+              },
+              "can": {
+                "type": "object",
+                "properties": {
+                  "view": {
+                    "type": "boolean"
+                  },
+                  "respond": {
+                    "type": "boolean"
+                  },
+                  "change_status": {
+                    "type": "boolean"
+                  },
+                  "manage_participants": {
+                    "type": "boolean"
+                  },
+                  "edit": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "TicketSection": {
+        "type": "object",
+        "description": "Retired via `active`, never deleted - tickets point at these rows forever.",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "key": {
+            "type": "string",
+            "example": "hiring.page"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "display_order": {
+            "type": "integer"
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "levels": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "object"
+            }
+          }
+        }
+      },
+      "TicketLevel": {
+        "type": "object",
+        "description": "Levels nest. Deactivating one SEVERS the chain above it: a section under an inactive level stops reaching everyone higher up.",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "key": {
+            "type": "string",
+            "example": "operations"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "parent_id": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "display_order": {
+            "type": "integer"
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "sections": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "object"
+            }
+          }
+        }
+      },
+      "TicketAssignment": {
+        "type": "object",
+        "description": "Exactly one of section/level. Stores are never named here - store_scoped decides whether the person's own store grants filter what reaches them.",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "user": {
+            "type": "object"
+          },
+          "section": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "level": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "store_scoped": {
+            "type": "boolean",
+            "description": "true = only tickets for stores this user holds. false = every store. A user matching several rows is unscoped if ANY of them is."
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "via": {
+            "type": "string",
+            "example": "level:3"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
         }
       }
     },
     "responses": {
-      "Settings": { "description": "Allowance, thresholds and the work-day config" },
-      "BreakEntry": { "description": "A break entry", "content": { "application/json": { "schema": { "type": "object", "properties": { "data": { "$ref": "#/components/schemas/BreakEntry" } } } } } },
-      "Unauthorized": { "description": "No token, an inactive token, or a user that has not replicated yet" },
-      "Forbidden": { "description": "pizzasys returned ext.authorized=false, or the token is not a user subject" },
-      "NotFound": { "description": "No such break for this user. 404 rather than 403, so ids cannot be probed." },
-      "ValidationError": { "description": "Laravel validation errors" },
+      "Settings": {
+        "description": "Allowance, thresholds and the work-day config"
+      },
+      "BreakEntry": {
+        "description": "A break entry",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "data": {
+                  "$ref": "#/components/schemas/BreakEntry"
+                }
+              }
+            }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "No token, an inactive token, or a user that has not replicated yet"
+      },
+      "Forbidden": {
+        "description": "pizzasys returned ext.authorized=false, or the token is not a user subject"
+      },
+      "NotFound": {
+        "description": "No such break for this user. 404 rather than 403, so ids cannot be probed."
+      },
+      "ValidationError": {
+        "description": "Laravel validation errors"
+      },
       "DomainConflict": {
         "description": "A domain rule refused the change. `error.code` is the contract: ALREADY_ON_BREAK, BREAK_OVERLAP (carries error.conflicts), BREAK_NOT_RUNNING, BREAK_ENDS_BEFORE_START, BREAK_STARTS_IN_FUTURE, BREAK_OUTSIDE_RETENTION_WINDOW, BREAK_CUSTOM_LABEL_REQUIRED, BREAK_CUSTOM_LABEL_NOT_ALLOWED, BREAK_TYPE_INACTIVE.",
-        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
       }
     }
   }

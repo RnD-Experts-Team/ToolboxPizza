@@ -171,7 +171,12 @@ class AuthTokenStoreScopeMiddleware
         if ($request->isJson()) {
             $body = (array) ($request->json()->all() ?? []);
         } elseif (! $request->isMethod('GET')) {
-            $body = (array) ($request->except(['entities', 'file', 'files']) ?? []);
+            // Excluding by name only reaches the TOP level: a multipart request
+            // carrying notes[0][files][] still hands an UploadedFile to the
+            // encoder below. Stripping file objects at every depth is what
+            // actually keeps this payload small, which is what the estate's
+            // name-based exclusion was reaching for.
+            $body = $this->withoutFiles((array) ($request->except(['entities', 'file', 'files']) ?? []));
         }
 
         // Add any request headers you want authz to inspect here
@@ -206,6 +211,35 @@ class AuthTokenStoreScopeMiddleware
         $this->ksortRecursive($ctx);
 
         return $ctx;
+    }
+
+    /**
+     * Drop uploaded files from the store context, however deeply nested.
+     *
+     * An authorization decision is never made on a file's bytes, and a file
+     * object does not survive the JSON encode in verifyWithAuthServer: the
+     * failure is caught there and reported as `active => false`, so the caller
+     * gets a 401 that has nothing whatever to do with their token. A test
+     * posting notes[0][files][] is what surfaced it.
+     *
+     * @param  array<mixed>  $input
+     * @return array<mixed>
+     */
+    private function withoutFiles(array $input): array
+    {
+        $out = [];
+
+        foreach ($input as $key => $value) {
+            // UploadedFile extends SplFileInfo, as does every file shape
+            // Symfony hands us here.
+            if ($value instanceof \SplFileInfo) {
+                continue;
+            }
+
+            $out[$key] = is_array($value) ? $this->withoutFiles($value) : $value;
+        }
+
+        return $out;
     }
 
     private function normalizeRouteParams(array $params): array
