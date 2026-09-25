@@ -17,7 +17,7 @@ return new class extends Migration
             // EXACTLY ONE of these is set. A section grant covers that section;
             // a level grant covers every section beneath it, however deep.
             //
-            // Enforced in TicketAssignmentService rather than by a CHECK
+            // Enforced in TicketCatalogService rather than by a CHECK
             // constraint: CHECK is not portable to older MySQL and SQLite's
             // cannot be altered later. No sibling service uses them either.
             $table->foreignId('ticket_section_id')->nullable()->constrained('ticket_sections')->cascadeOnDelete();

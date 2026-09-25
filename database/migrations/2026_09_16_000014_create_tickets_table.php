@@ -49,7 +49,7 @@ return new class extends Migration
 
             // Denormalised from responses, notes and status changes so the
             // default sort is one indexed scan rather than a correlated MAX().
-            // ONE owner writes it: TicketWriteService::touchActivity().
+            // ONE owner writes it: TicketService::touchActivity().
             $table->dateTime('last_activity_at');
 
             $table->timestamps();

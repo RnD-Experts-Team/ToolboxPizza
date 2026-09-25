@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Services\Tickets;
+namespace App\Services;
 
 use App\Models\Store;
 use App\Models\UserStoreRole;
@@ -103,5 +103,34 @@ class StoreAccessResolver
             ->pluck('id')
             ->map(fn ($id) => (int) $id)
             ->all();
+    }
+
+    /**
+     * Every active grant this user holds, as store code => role names.
+     *
+     * ONE query, for callers that have to answer holdsAnyRoleAtStore() many
+     * times in a request - resolving a folder chain, say. The 'all' key is an
+     * unscoped grant and covers every store, so a caller must union it in
+     * rather than looking up the code alone.
+     *
+     * @return array<string, array<int, string>>
+     */
+    public function roleNamesByStoreFor(int $userId): array
+    {
+        $map = [];
+
+        $rows = UserStoreRole::query()
+            ->where('active', true)
+            ->where('user_id', $userId)
+            ->get(['store_id', 'role_name']);
+
+        foreach ($rows as $row) {
+            // NULL is the estate's older spelling of an unscoped grant; it is
+            // folded into 'all' so callers have one key to check.
+            $key = $row->store_id === null ? 'all' : (string) $row->store_id;
+            $map[$key][] = (string) $row->role_name;
+        }
+
+        return array_map(fn (array $names) => array_values(array_unique($names)), $map);
     }
 }

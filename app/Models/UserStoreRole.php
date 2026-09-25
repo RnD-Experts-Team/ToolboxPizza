@@ -2,7 +2,6 @@
 
 namespace App\Models;
 
-use App\Models\Concerns\ReplicatedModel;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -15,7 +14,13 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 class UserStoreRole extends Model
 {
-    use ReplicatedModel;
+    /**
+     * Rows arrive over NATS carrying the source service's primary key, so the
+     * id is supplied, never generated.
+     */
+    public $incrementing = false;
+
+    protected $keyType = 'int';
 
     protected $fillable = [
         'id',

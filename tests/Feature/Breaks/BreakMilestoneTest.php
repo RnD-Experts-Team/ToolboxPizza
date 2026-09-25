@@ -5,7 +5,7 @@ namespace Tests\Feature\Breaks;
 use App\Models\BreakEntry;
 use App\Models\BreakMilestoneFiring;
 use App\Models\BreakType;
-use App\Services\Breaks\BreakMilestoneEvaluator;
+use App\Services\Breaks\BreakMilestoneService;
 use Carbon\CarbonImmutable;
 use Database\Seeders\BreakTypeSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -16,7 +16,7 @@ class BreakMilestoneTest extends TestCase
 {
     use FakesAuthServer, RefreshDatabase;
 
-    private BreakMilestoneEvaluator $evaluator;
+    private BreakMilestoneService $evaluator;
 
     protected function setUp(): void
     {
@@ -30,7 +30,7 @@ class BreakMilestoneTest extends TestCase
         $this->postJson('/api/v1/break-settings', ['daily_allowance_minutes' => 50], $this->headers())->assertOk();
         $this->postJson('/api/v1/break-milestones', ['thresholds' => [20, 40]], $this->headers())->assertOk();
 
-        $this->evaluator = app(BreakMilestoneEvaluator::class);
+        $this->evaluator = app(BreakMilestoneService::class);
     }
 
     private function entry(string $slug, string $from, ?string $to): BreakEntry

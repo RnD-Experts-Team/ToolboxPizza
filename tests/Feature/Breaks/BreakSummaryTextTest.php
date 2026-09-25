@@ -4,7 +4,7 @@ namespace Tests\Feature\Breaks;
 
 use App\Models\BreakEntry;
 use App\Models\User;
-use App\Services\Breaks\BreakMilestoneEvaluator;
+use App\Services\Breaks\BreakMilestoneService;
 use Carbon\CarbonImmutable;
 use Database\Seeders\BreakTypeSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -61,7 +61,7 @@ class BreakSummaryTextTest extends TestCase
         $smoking = $this->entry('smoking', '2026-09-15T18:10:00Z', '2026-09-15T18:44:00Z');
         $smoking->notes()->create(['body' => 'stepped out with the delivery driver', 'created_by' => $this->authUser->id]);
 
-        app(BreakMilestoneEvaluator::class)->evaluate($this->authUser, '2026-09-15');
+        app(BreakMilestoneService::class)->evaluate($this->authUser, '2026-09-15');
 
         $expected = <<<'TEXT'
         Break summary - Tuesday, 15 September 2026

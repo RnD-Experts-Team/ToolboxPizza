@@ -3,7 +3,7 @@
 namespace Tests\Feature\Tickets;
 
 use App\Models\TicketLevel;
-use App\Services\Tickets\TicketLevelGraph;
+use App\Services\Tickets\TicketAccessService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
@@ -22,9 +22,9 @@ class TicketLevelGraphTest extends TestCase
         ]);
     }
 
-    private function graph(): TicketLevelGraph
+    private function graph(): TicketAccessService
     {
-        return app(TicketLevelGraph::class);
+        return app(TicketAccessService::class);
     }
 
     public function test_ancestry_walks_all_the_way_to_the_root(): void

@@ -5,7 +5,7 @@ namespace Tests\Feature\ToolboxEvents;
 use App\Jobs\PublishOutboxEventJob;
 use App\Models\BreakType;
 use App\Models\ToolboxOutboxEvent;
-use App\Services\Breaks\BreakSettingsService;
+use App\Services\Breaks\BreakService;
 use Carbon\CarbonImmutable;
 use Database\Seeders\BreakTypeSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -38,7 +38,7 @@ class BreakBroadcastTest extends TestCase
 
         config(['toolbox.realtime.enabled' => true]);
 
-        app(BreakSettingsService::class)->updateAllowance($this->authUser, 50);
+        app(BreakService::class)->updateAllowance($this->authUser, 50);
     }
 
     private function typeId(string $slug): int
@@ -202,7 +202,7 @@ class BreakBroadcastTest extends TestCase
 
     public function test_a_milestone_crossing_is_broadcast(): void
     {
-        app(BreakSettingsService::class)->replaceThresholds($this->authUser, [20]);
+        app(BreakService::class)->replaceThresholds($this->authUser, [20]);
 
         $this->postJson('/api/v1/breaks', [
             'break_type_id' => $this->typeId('smoking'),
@@ -228,7 +228,7 @@ class BreakBroadcastTest extends TestCase
     public function test_realtime_and_notifications_are_independently_gated(): void
     {
         config(['toolbox.realtime.enabled' => true, 'toolbox.notifications.enabled' => false]);
-        app(BreakSettingsService::class)->replaceThresholds($this->authUser, [20]);
+        app(BreakService::class)->replaceThresholds($this->authUser, [20]);
 
         $this->postJson('/api/v1/breaks', [
             'break_type_id' => $this->typeId('smoking'),
@@ -250,7 +250,7 @@ class BreakBroadcastTest extends TestCase
     }
 
     /**
-     * Same reason as BreakNotifier: this runs inside BreakWriteService's
+     * Same reason as the notification: this runs inside BreakService's
      * transaction and every queue connection has after_commit => false.
      */
     public function test_the_publish_job_is_deferred_until_after_commit(): void

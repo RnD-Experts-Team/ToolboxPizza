@@ -3,6 +3,8 @@
 namespace App\Providers;
 
 use App\Services\Breaks\WorkDayResolver;
+use App\Services\Tickets\TicketAccessService;
+use App\Services\Workbooks\WorkbookAccessService;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -19,6 +21,18 @@ class AppServiceProvider extends ServiceProvider
             (int) config('toolbox.work_day.cutoff_hour'),
             (string) config('toolbox.work_day.timezone'),
         ));
+
+        // SCOPED, not singleton: both memoise per-request state - the folder
+        // tree, each resource's role list, and the caller's own grants - and a
+        // process-lifetime instance would carry one request's answers into the
+        // next under Octane.
+        //
+        // They have to be shared WITHIN a request, though. Resolving a fresh
+        // instance per call throws the memo away, and the grid endpoint then
+        // reloads the whole folder tree and re-reads the viewer's grants three
+        // times over for one page.
+        $this->app->scoped(TicketAccessService::class);
+        $this->app->scoped(WorkbookAccessService::class);
     }
 
     /**

@@ -7,7 +7,7 @@ use App\Models\Note;
 use App\Models\Ticket;
 use App\Models\TicketResponse;
 use App\Models\User;
-use App\Services\Tickets\TicketWriteService;
+use App\Services\Tickets\TicketService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
@@ -356,7 +356,7 @@ class TicketNotesAndAttachmentsTest extends TestCase
         $paths = Attachment::query()->pluck('path')->all();
         $this->assertCount(3, $paths);
 
-        app(TicketWriteService::class)->delete($ticket);
+        app(TicketService::class)->delete($ticket);
 
         // withTrashed on both: a soft-deleted row is still a row nothing can
         // reach, which is the orphan this guards against.

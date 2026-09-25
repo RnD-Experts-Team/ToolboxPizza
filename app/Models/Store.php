@@ -2,7 +2,7 @@
 
 namespace App\Models;
 
-use App\Models\Concerns\ReplicatedModel;
+use App\Exceptions\ToolboxException;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
@@ -17,7 +17,15 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  */
 class Store extends Model
 {
-    use ReplicatedModel, SoftDeletes;
+    use SoftDeletes;
+
+    /**
+     * Rows arrive over NATS carrying the source service's primary key, so the
+     * id is supplied, never generated.
+     */
+    public $incrementing = false;
+
+    protected $keyType = 'int';
 
     protected $fillable = [
         'id',
@@ -32,6 +40,20 @@ class Store extends Model
     protected function casts(): array
     {
         return [];
+    }
+
+    /**
+     * The store a route names. Routes carry the store CODE ("03795-00001"),
+     * never the pk, so the value pizzasys authorised is literally the URL
+     * segment. Resolved by hand rather than by route-model binding for that
+     * reason: binding would forward the model's integer id instead.
+     *
+     * @throws ToolboxException 404 STORE_NOT_FOUND when it has not replicated here yet
+     */
+    public static function resolveByNumber(string $storeNumber): self
+    {
+        return self::query()->where('store_number', $storeNumber)->first()
+            ?? throw ToolboxException::storeNotFound($storeNumber);
     }
 
     /** @return HasMany<Ticket, $this> */

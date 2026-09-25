@@ -3,7 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Models\Attachment;
-use App\Services\Attachments\AttachmentService;
+use App\Services\AttachmentService;
 use Illuminate\Console\Command;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Storage;

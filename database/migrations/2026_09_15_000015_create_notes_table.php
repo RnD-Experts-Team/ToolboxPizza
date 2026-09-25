@@ -25,7 +25,7 @@ return new class extends Migration
             //
             // NOTE: a morph has no foreign key, so nothing cascades. Every
             // deletion path must remove notes explicitly - see
-            // BreakWriteService::delete() and PruneBreaksCommand.
+            // BreakService::delete() and PruneBreaksCommand.
             $table->morphs('notable');
 
             // Unused today; kept because the sibling has it and typed notes

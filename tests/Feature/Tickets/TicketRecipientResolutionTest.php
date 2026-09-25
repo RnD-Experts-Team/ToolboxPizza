@@ -8,7 +8,7 @@ use App\Models\TicketLevel;
 use App\Models\TicketSection;
 use App\Models\User;
 use App\Models\UserStoreRole;
-use App\Services\Tickets\TicketRecipientResolver;
+use App\Services\Tickets\TicketAccessService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -79,7 +79,7 @@ class TicketRecipientResolutionTest extends TestCase
      */
     private function recipients(?Store $store = null): array
     {
-        return app(TicketRecipientResolver::class)->assigneesFor($this->section, $store ?? $this->store);
+        return app(TicketAccessService::class)->assigneesFor($this->section, $store ?? $this->store);
     }
 
     // ---- ancestry ------------------------------------------------------
@@ -282,7 +282,7 @@ class TicketRecipientResolutionTest extends TestCase
         $this->assignToSection($direct, $this->section);
         $this->assignToLevel($viaLevel, $level);
 
-        $candidates = collect(app(TicketRecipientResolver::class)->candidatesFor($this->section))
+        $candidates = collect(app(TicketAccessService::class)->candidatesFor($this->section))
             ->keyBy('user_id');
 
         $this->assertSame('section', $candidates[10]['via']);
@@ -308,7 +308,7 @@ class TicketRecipientResolutionTest extends TestCase
         $this->grantStore($scopedWith, '03795-00001');
         $this->grantStore($scopedWithout, '03795-00002');
 
-        $resolver = app(TicketRecipientResolver::class);
+        $resolver = app(TicketAccessService::class);
         $set = $this->recipients();
 
         foreach ([$scopedWith, $scopedWithout, $unscoped, $unrelated] as $u) {
@@ -335,7 +335,7 @@ class TicketRecipientResolutionTest extends TestCase
         $u = $this->user(10);
         $this->assignToLevel($u, $top, storeScoped: false);
 
-        $resolver = app(TicketRecipientResolver::class);
+        $resolver = app(TicketAccessService::class);
         $sections = $resolver->assignedSectionsFor($u->id);
 
         // Reached both sections by walking down...

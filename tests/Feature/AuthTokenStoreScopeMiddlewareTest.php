@@ -14,12 +14,15 @@ use Tests\TestCase;
 
 /**
  * The whole API sits behind this middleware, so it is tested against the
- * trivial health route: an auth regression fails here rather than somewhere
- * inside a domain test.
+ * cheapest read there is - the break catalogue, which has no side effects and
+ * nothing user-specific to get wrong - so an auth regression fails here rather
+ * than somewhere inside a domain test.
  */
 class AuthTokenStoreScopeMiddlewareTest extends TestCase
 {
     use BuildsTicketWorld, FakesAuthServer, RefreshDatabase;
+
+    private const PROBE = '/api/v1/break-types';
 
     protected function setUp(): void
     {
@@ -30,16 +33,17 @@ class AuthTokenStoreScopeMiddlewareTest extends TestCase
 
     public function test_a_verified_token_resolves_to_the_replicated_user(): void
     {
-        $this->getJson('/api/v1/health', $this->headers())
-            ->assertOk()
-            ->assertJsonPath('data.status', 'ok')
-            ->assertJsonPath('data.service', 'Toolbox')
-            ->assertJsonPath('data.user_id', 9);
+        $this->getJson(self::PROBE, $this->headers())->assertOk();
+
+        // Reading settings creates the row for whoever the request resolved to,
+        // so its owner is the user the token was logged in as.
+        $this->getJson('/api/v1/break-settings', $this->headers())->assertOk();
+        $this->assertDatabaseHas('user_break_settings', ['user_id' => 9]);
     }
 
     public function test_a_request_without_a_bearer_token_is_rejected(): void
     {
-        $this->getJson('/api/v1/health', ['Accept' => 'application/json'])
+        $this->getJson(self::PROBE, ['Accept' => 'application/json'])
             ->assertStatus(401);
     }
 
@@ -47,21 +51,21 @@ class AuthTokenStoreScopeMiddlewareTest extends TestCase
     {
         $this->tokenActive = false;
 
-        $this->getJson('/api/v1/health', $this->headers())->assertStatus(401);
+        $this->getJson(self::PROBE, $this->headers())->assertStatus(401);
     }
 
     public function test_a_token_the_auth_server_did_not_authorize_is_forbidden(): void
     {
         $this->tokenAuthorized = false;
 
-        $this->getJson('/api/v1/health', $this->headers())->assertStatus(403);
+        $this->getJson(self::PROBE, $this->headers())->assertStatus(403);
     }
 
     public function test_a_token_for_a_user_that_has_not_replicated_yet_is_rejected(): void
     {
         User::query()->whereKey(9)->delete();
 
-        $this->getJson('/api/v1/health', $this->headers())->assertStatus(401);
+        $this->getJson(self::PROBE, $this->headers())->assertStatus(401);
     }
 
     /**
@@ -73,7 +77,7 @@ class AuthTokenStoreScopeMiddlewareTest extends TestCase
     {
         $this->tokenSubjectType = 'employee';
 
-        $this->getJson('/api/v1/health', $this->headers())->assertStatus(403);
+        $this->getJson(self::PROBE, $this->headers())->assertStatus(403);
     }
 
     /**

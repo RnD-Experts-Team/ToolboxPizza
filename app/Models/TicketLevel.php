@@ -12,7 +12,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * A grouping over sections. Levels nest, so an assignment high up reaches every
  * section beneath it.
  *
- * Ancestry walks live in TicketLevelGraph, not here - a relation-based walk
+ * Ancestry walks live in TicketAccessService, not here - a relation-based walk
  * would issue a query per hop and has nowhere to put the cycle guard.
  */
 class TicketLevel extends Model

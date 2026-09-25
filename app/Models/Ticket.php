@@ -3,8 +3,6 @@
 namespace App\Models;
 
 use App\Enums\TicketStatus;
-use App\Models\Concerns\HasAttachments;
-use App\Models\Concerns\HasNotes;
 use Database\Factories\TicketFactory;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
@@ -12,6 +10,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 /**
@@ -22,7 +21,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 class Ticket extends Model
 {
     /** @use HasFactory<TicketFactory> */
-    use HasAttachments, HasFactory, HasNotes, SoftDeletes;
+    use HasFactory, SoftDeletes;
 
     protected $fillable = [
         'store_id',
@@ -98,5 +97,27 @@ class Ticket extends Model
     public function scopeForStore(Builder $query, int $storeId): Builder
     {
         return $query->where('store_id', $storeId);
+    }
+
+    /**
+     * Free-text notes. Polymorphic, so NOTHING CASCADES: every deletion path has
+     * to remove them itself.
+     *
+     * @return MorphMany<Note, $this>
+     */
+    public function notes(): MorphMany
+    {
+        return $this->morphMany(Note::class, 'notable');
+    }
+
+    /**
+     * Files. Polymorphic, so NOTHING CASCADES: every deletion path has to remove
+     * them itself, and attachments:prune sweeps whatever slips through.
+     *
+     * @return MorphMany<Attachment, $this>
+     */
+    public function attachments(): MorphMany
+    {
+        return $this->morphMany(Attachment::class, 'attachable');
     }
 }

@@ -8,7 +8,7 @@ use App\Models\Ticket;
 use App\Models\TicketResponse;
 use App\Models\ToolboxOutboxEvent;
 use App\Models\User;
-use App\Services\Tickets\TicketNotifier;
+use App\Services\ToolboxEvents\ToolboxOutboxService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
@@ -62,27 +62,24 @@ class TicketTransactionRollbackTest extends TestCase
     /**
      * Blow up inside the transaction, after the attachment rows are already in.
      *
-     * An anonymous subclass rather than a mock: the notifier's own constructor
-     * dependencies are irrelevant to a method that only throws, and this keeps
-     * the failure point obvious from the test body.
+     * The notification is the last thing written inside every ticket write, so
+     * making the outbox throw on it fails the transaction at exactly that point.
+     * An anonymous subclass rather than a mock keeps the failure obvious from
+     * the test body.
      */
     private function breakTheNotifier(): void
     {
-        $this->instance(TicketNotifier::class, new class extends TicketNotifier
+        config(['toolbox.tickets.notifications.enabled' => true]);
+
+        // Somebody has to be listening, or there is nothing to notify and the
+        // injected failure is never reached.
+        $this->makeAssignee(50);
+
+        $this->instance(ToolboxOutboxService::class, new class extends ToolboxOutboxService
         {
             public function __construct() {}
 
-            public function enabled(): bool
-            {
-                return true;
-            }
-
-            public function created(User $actor, Ticket $ticket): ?ToolboxOutboxEvent
-            {
-                throw new RuntimeException('Injected failure inside the transaction.');
-            }
-
-            public function responded(User $actor, Ticket $ticket, TicketResponse $response): ?ToolboxOutboxEvent
+            public function notify(array $userIds, array $notification): ToolboxOutboxEvent
             {
                 throw new RuntimeException('Injected failure inside the transaction.');
             }

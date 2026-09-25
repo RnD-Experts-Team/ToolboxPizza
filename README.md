@@ -1,11 +1,41 @@
 # ToolboxPizza
 
-The home for features that belong to none of the other Pizza services. Two
-slices so far: a **self-service break tracker** and an **internal ticketing
-system**.
+The home for features that belong to none of the other Pizza services. Three
+slices so far: a **self-service break tracker**, an **internal ticketing
+system**, and a **workbook system** — user-defined tables in nested folders,
+each shareable at a chosen level.
 
 Headless JSON API, like every sibling service — `resources/` is the untouched
 Laravel skeleton. The UI lives in `b-dashboard-pizza`.
+
+**Frontend contracts** — one per module, written for the `b-dashboard-pizza` developer:
+
+| | |
+|---|---|
+| [`docs/BREAKS_FRONTEND.md`](docs/BREAKS_FRONTEND.md) | the timer, the day view, milestones, the work-day rule |
+| [`docs/TICKETS_FRONTEND.md`](docs/TICKETS_FRONTEND.md) | **how the dashboard tags its pages with a `section_key`**, routing, permissions |
+| [`docs/WORKBOOK_SYSTEM_FRONTEND.md`](docs/WORKBOOK_SYSTEM_FRONTEND.md) | folders, workbooks, the visibility tag |
+Each module doc ends with the notifications and live updates the frontend receives - the
+delivered notification, exactly as it arrives, never the outbox event that carried it.
+
+### Code layout
+
+The same shape as HiringPizza: one controller per feature, a service that owns
+the writes (and sends that feature's notifications), a query service that owns
+the reads and how they are presented, and a Form Request per action.
+
+| | Controllers | Services (`app/Services/…`) |
+|---|---|---|
+| Breaks | `BreakController`, `BreakSettingController` | `Breaks/BreakService`, `BreakQueryService`, `BreakMilestoneService`, `WorkDayResolver` |
+| Tickets | `TicketController`, `TicketCatalogController` | `Tickets/TicketService`, `TicketQueryService`, `TicketAccessService`, `TicketCatalogService` |
+| Workbooks | `WorkbookController`, `WorkbookRowController` | `Workbooks/WorkbookService`, `WorkbookRowService`, `WorkbookQueryService`, `WorkbookAccessService` |
+| Shared | - | `AttachmentService`, `StoreAccessResolver`, `ToolboxEvents/*`, `Nats/*`, `EventConsume/*` |
+
+Requests live in `app/Http/Requests/Api/V1`, named `{Feature}{Action}Request`.
+Domain failures are `app/Exceptions/{Break,Ticket,Workbook}Exception` and render
+themselves. There are no controller, request or model concerns; the only traits
+left are the NATS replication helpers in `EventConsume/Handlers/Concerns`, which
+OperationsPizza shares.
 
 ---
 
@@ -86,6 +116,50 @@ who own the queue.
 the response carries `data.warnings: ["no_recipients"]` — refusing it would
 throw away someone's report because of an admin's configuration gap.
 
+## What the workbook system does
+
+Folders nest; a folder holds workbooks; a workbook has typed columns and rows;
+a row holds one cell per column. Modelled on the workbook feature in
+ClockInOut-pne, with the parts that feature had no need for: typed columns,
+nested folders, an owning store, and a visibility tag.
+
+### The rule that shapes everything
+
+Every folder, workbook **and row** carries one of seven tags: `owner_only`,
+`store_view`, `store_edit`, `store_role_view`, `store_role_edit`,
+`all_stores_view`, `all_stores_edit`. The role tags name one or more role names,
+matched against the replicated `user_store_roles` — **direct grants only**,
+because pizzasys' role hierarchy is not replicated here.
+
+**Most restrictive wins.** What a viewer gets is the item's own tag intersected
+with every folder above it, all the way to the root. So a read-only folder makes
+everything inside it read-only, two role tags with disjoint lists reach nobody,
+and a workbook inside somebody else's private folder is out of reach even for
+its own author. The creator always keeps view and edit on their *own* item, but
+that carve-out does not carry up the chain.
+
+`WorkbookAccessService` is the single source of truth: the rules in memory for one item,
+and the same rules in SQL for the lists, applied before
+pagination so page counts are honest. The two must agree, and
+`WorkbookVisibilityMatrixTest` asserts that for every tag.
+
+Every single-item response carries `data.viewer.can` and
+`data.effective_visibility`, the latter naming the ancestor that capped the
+access — without it the UI can only say "you cannot edit this", which with
+nested folders is a support ticket every time.
+
+### Reads are global, creates are store-scoped
+
+An `all_stores_view` folder is visible from every store at once, so a
+store-prefixed read URL would be a lie — the visibility clause is what scopes a
+read. A create has to record *which* store it happened at, and that is a
+question pizzasys can gate. Mutations of an existing item are global for the
+same reason a read is: an `all_stores_edit` workbook is meant to be editable
+from another store, and naming the owning store in the path would lock out
+exactly the person the tag exists to admit.
+
+---
+
 ---
 
 ## Setup
@@ -134,9 +208,15 @@ STORE_NOT_FOUND`.
    It does **not** attach the permissions to any role: `view`/`manage tickets`
    are checked **per store**, so they must come from the role a user holds *for
    that store*, while `administer tickets` is checked globally.
-2. `AUTH_SERVER_SERVICE_NAME` (default `Toolbox`) must match the `service`
+2. **The workbook routes are not in that seeder yet.** Until they are, every one
+   of them 403s. They need three permissions: `view workbooks` (global,
+   `store_scope_mode: none`) on every `GET`; `create workbooks` (per store,
+   `store_scope_mode: scoped`) on the three `stores/{storeId}/…` creates; and
+   `manage workbooks` (global) on every other `POST`/`DELETE`. The last one is
+   global deliberately - see limitation 3 under Workbooks.
+3. `AUTH_SERVER_SERVICE_NAME` (default `Toolbox`) must match the `service`
    string the dashboard passes to `canAccessRoute({ service: ... })`.
-3. Streams and durable consumers are created **manually** via the NATS CLI; the
+4. Streams and durable consumers are created **manually** via the NATS CLI; the
    app never calls `create()`. The exact commands are in `config/nats.php`.
 
 ---
@@ -153,7 +233,6 @@ services.
 
 | Method | Path | What |
 |---|---|---|
-| `GET` | `health` | Liveness + the user the token resolved to |
 | `GET` | `break-types` | The picker: active types in display order |
 | `GET` | `break-settings` | Allowance + thresholds. **Creates the row on first read** |
 | `POST` | `break-settings` | `{daily_allowance_minutes}` |
@@ -250,6 +329,57 @@ buttons the server would actually honour instead of discovering a 409.
 
 ---
 
+### Workbooks
+
+Reads are not store-scoped; creates are. See above for why.
+
+| Method | Path | What |
+|---|---|---|
+| `GET` | `workbook-options` | The labelled tag and column-type catalogues for the UI |
+| `GET` | `workbook-folders` | Folders the caller can see. `parent_id` (omit = whole tree, empty = roots only), `search`, `sort_by`, `sort_order`, `per_page` |
+| `GET` | `workbook-folders/{id}` | One folder plus its breadcrumb |
+| `POST` | `stores/{storeId}/workbook-folders` | Create. Needs edit rights on `parent_id` when nested |
+| `POST` | `workbook-folders/{id}` | Partial: `name`, `description`, `parent_id`, `visibility` |
+| `POST` | `workbook-folders/{id}/visibility` | Retag only |
+| `DELETE` | `workbook-folders/{id}` | **Cascades the whole subtree.** Refuses a populated folder without `?force=true`, and says how much is inside |
+| `GET` | `workbook-folders/{id}/workbooks` | Workbooks in a folder |
+| `GET` | `workbooks/{id}` | One workbook with columns and breadcrumb |
+| `POST` | `stores/{storeId}/workbook-folders/{id}/workbooks` | Create, with its columns. Needs edit rights on the folder |
+| `POST` | `workbooks/{id}` | `name`, `description`, `visibility` — **not** columns |
+| `POST` | `workbooks/{id}/visibility` | Retag only |
+| `DELETE` | `workbooks/{id}` | 204 |
+| `GET` | `workbooks/{id}/columns` | In display order |
+| `POST` | `workbooks/{id}/columns` | **Whole-list replace.** Array order is display order; an omitted column is deleted with its cells |
+| `GET` | `workbooks/{id}/rows` | The grid. `search`, `filter[{columnId}]`, `sort_column`, `sort_order`, `per_page` |
+| `POST` | `stores/{storeId}/workbooks/{id}/rows` | Add a row. Its store need not be the workbook's |
+| `GET` | `workbooks/{id}/rows/{rowId}` | One row |
+| `POST` | `workbooks/{id}/rows/{rowId}` | **Partial** cell update, keyed by column id |
+| `POST` | `workbooks/{id}/rows/{rowId}/visibility` | Retag one row |
+| `POST` | `workbooks/{id}/rows/reorder` | `{row_ids: [...]}`; rows not named keep their position |
+| `DELETE` | `workbooks/{id}/rows/{rowId}` | 204 |
+
+An item the caller may not see answers **404 on every verb**, never 403 — a 403
+would confirm it exists.
+
+Column types are `text`, `long_text`, `number`, `date`, `boolean`, `select`.
+Each writes its own typed slot on `workbook_cells` **and** `value_text`; the
+typed slot is what sorts and filters (so 2 comes before 10, and a date filter
+matches a whole day), and `value_text` is what the cross-column search reads,
+which keeps that to one clause. An unparseable filter value is dropped silently
+rather than 422'd, per the house convention.
+
+#### Workbook error codes
+
+`WORKBOOK_FORBIDDEN` (403, carries `error.capped_by` when an ancestor is the
+reason) · `WORKBOOK_FOLDER_CYCLE` (422) · `WORKBOOK_FOLDER_NOT_EMPTY` (409) ·
+`WORKBOOK_ROLES_REQUIRED` (422) · `WORKBOOK_COLUMN_FOREIGN` (422) ·
+`WORKBOOK_CELL_TYPE_MISMATCH` (422, carries `error.allowed` for a choice
+column) · `WORKBOOK_LAST_COLUMN` (422) · `WORKBOOK_ROW_FOREIGN` (422)
+
+The full frontend contract is in [`docs/WORKBOOK_SYSTEM_FRONTEND.md`](docs/WORKBOOK_SYSTEM_FRONTEND.md).
+
+---
+
 ## Realtime / notifications
 
 Four independent flags. **Tickets have their own**, so the module can ship
@@ -271,15 +401,19 @@ flags only decide what goes on the wire.
 the only Reverb in the estate and does the broadcasting. Nothing about Reverb,
 Echo or Pusher belongs in ToolboxPizza.
 
-Subjects published: `toolbox.v1.break.milestone_reached`,
-`toolbox.v1.break.allowance_exceeded`, `toolbox.v1.ticket.{created,responded,
-status_changed,participant_added}`, `notifications.v1.notification.send`,
-`notifications.v1.broadcast.send`.
+**A notification is an outbox event on the notifications channel**, the same
+as in HiringPizza: written inside the transaction that caused it, picked up by
+NotificationsPizza, and delivered from there. Two subjects, both via
+`ToolboxOutboxService::notify()` / `broadcast()`:
 
-The `toolbox.v1.ticket.*` domain events each record `recipient_user_ids` — who
-was told **at the time**. Assignment resolves dynamically, so the live answer
-moves with the org chart and the outbox is the only honest record of who was
-actually notified.
+| Subject | What NotificationsPizza does with it |
+|---|---|
+| `notifications.v1.notification.send` | stores a notification per user and pushes `.notification.created` |
+| `notifications.v1.broadcast.send` | pushes a live event to each user's socket; stores nothing |
+
+The notification envelope's `users` list records who was told **at the time**.
+Assignment resolves dynamically, so the live answer moves with the org chart
+and the outbox is the only honest record of who was actually notified.
 
 ### Live break state
 
@@ -394,8 +528,8 @@ it would break a live write. It is also what covers a process killed between
    reconciliation job and pizzasys emits no snapshot subject.
 3. **Assignment is resolved dynamically, never snapshotted.** An org change
    moves who can act on an existing ticket, and `viewer.can` shifts under the
-   user mid-session. The outbox records `recipient_user_ids` so notification
-   history stays honest; exception assignees are the way to pin one person to
+   user mid-session. Each notification's outbox row records who was told
+   at the time, so notification history stays honest; exception assignees are the way to pin one person to
    one ticket.
 4. **Deactivating a mid-tree level silently stops tickets reaching everyone
    above it.** A defensible reading of `active`, and a footgun for an admin who
@@ -416,6 +550,27 @@ it would break a live write. It is also what covers a process killed between
    the inbox is self-scoped locally against the replicated `user_store_roles`.
    That means **the inbox's visibility clause is the only thing protecting it**.
    It is tested, but it is one clause rather than two independent checks.
+
+### Workbooks
+
+1. **`role_name` matching is direct-grant only.** pizzasys expands a role into
+   the roles beneath it per store; that hierarchy is not replicated here, so a
+   GM does not match a `shift_lead` tag unless separately granted it.
+2. **Role names are free text** with no local catalogue to validate against —
+   roles are created dynamically in pizzasys and only ever arrive here
+   denormalised onto a grant. A typo is a tag that matches nobody, silently.
+   The service trims and de-duplicates; the UI is asked to show a match count.
+3. **Mutations of an existing item are gated globally at pizzasys, not per
+   store** — an `all_stores_edit` item cannot be, without locking out the very
+   caller the tag admits. `WorkbookAccessService` is the per-item
+   authority there, so those routes have one clause rather than two independent
+   checks. The same exposure `GET /tickets` already has.
+4. **No outbox events.** Nothing downstream consumes workbook changes yet; the
+   hook point is `ToolboxOutboxService::record()`, inside the write transaction.
+5. **Deleting a folder cascades the whole subtree** at the database level. The
+   `force` flag and the counts in `WORKBOOK_FOLDER_NOT_EMPTY` are the only
+   guard; there is no undo and no soft delete.
+6. **No retention and no rate limiting**, as elsewhere in this service.
 
 ### Breaks
 

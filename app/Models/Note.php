@@ -2,11 +2,11 @@
 
 namespace App\Models;
 
-use App\Models\Concerns\HasAttachments;
 use Database\Factories\NoteFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
@@ -17,7 +17,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 class Note extends Model
 {
     /** @use HasFactory<NoteFactory> */
-    use HasAttachments, HasFactory, SoftDeletes;
+    use HasFactory, SoftDeletes;
 
     protected $fillable = [
         'notable_type',
@@ -37,5 +37,16 @@ class Note extends Model
     public function creator(): BelongsTo
     {
         return $this->belongsTo(User::class, 'created_by');
+    }
+
+    /**
+     * Files. Polymorphic, so NOTHING CASCADES: every deletion path has to remove
+     * them itself, and attachments:prune sweeps whatever slips through.
+     *
+     * @return MorphMany<Attachment, $this>
+     */
+    public function attachments(): MorphMany
+    {
+        return $this->morphMany(Attachment::class, 'attachable');
     }
 }

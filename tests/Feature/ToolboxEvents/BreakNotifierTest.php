@@ -6,8 +6,8 @@ use App\Jobs\PublishOutboxEventJob;
 use App\Models\BreakEntry;
 use App\Models\BreakMilestoneFiring;
 use App\Models\ToolboxOutboxEvent;
-use App\Services\Breaks\BreakMilestoneEvaluator;
-use App\Services\Breaks\BreakSettingsService;
+use App\Services\Breaks\BreakMilestoneService;
+use App\Services\Breaks\BreakService;
 use Carbon\CarbonImmutable;
 use Database\Seeders\BreakTypeSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -33,7 +33,7 @@ class BreakNotifierTest extends TestCase
 
         CarbonImmutable::setTestNow('2026-09-15T21:00:00Z');
 
-        $settings = app(BreakSettingsService::class);
+        $settings = app(BreakService::class);
         $settings->updateAllowance($this->authUser, 50);
         $settings->replaceThresholds($this->authUser, [20]);
     }
@@ -47,7 +47,7 @@ class BreakNotifierTest extends TestCase
 
     private function evaluate(): void
     {
-        app(BreakMilestoneEvaluator::class)->evaluate($this->authUser, '2026-09-15');
+        app(BreakMilestoneService::class)->evaluate($this->authUser, '2026-09-15');
     }
 
     /**
@@ -104,31 +104,27 @@ class BreakNotifierTest extends TestCase
         $this->assertDatabaseHas('toolbox_outbox_events', ['id' => $firing->outbox_event_id]);
     }
 
-    public function test_a_domain_event_is_recorded_alongside_the_notification(): void
+    public function test_a_notification_is_sent_only_on_the_notifications_channel(): void
     {
         config(['toolbox.notifications.enabled' => true]);
 
         $this->breakOf(25);
         $this->evaluate();
 
-        $this->assertDatabaseHas('toolbox_outbox_events', ['subject' => 'toolbox.v1.break.milestone_reached']);
-        $this->assertDatabaseHas('toolbox_outbox_events', ['subject' => 'notifications.v1.notification.send']);
+        // Everything that leaves this service for the bell is an event on the
+        // notifications channel - there is no parallel toolbox.* event.
+        $this->assertSame(
+            ['notifications.v1.notification.send'],
+            ToolboxOutboxEvent::query()->pluck('subject')->unique()->values()->all(),
+        );
     }
 
-    public function test_exceeding_the_allowance_publishes_its_own_event_carrying_the_overage(): void
+    public function test_exceeding_the_allowance_sends_its_own_notification_carrying_the_overage(): void
     {
         config(['toolbox.notifications.enabled' => true]);
 
         $this->breakOf(54);
         $this->evaluate();
-
-        $domain = ToolboxOutboxEvent::query()
-            ->where('subject', 'toolbox.v1.break.allowance_exceeded')
-            ->firstOrFail();
-
-        $this->assertSame('allowance', $domain->payload['data']['kind']);
-        $this->assertSame(4, $domain->payload['data']['over_minutes']);
-        $this->assertSame(54, $domain->payload['data']['counted_minutes']);
 
         $notification = ToolboxOutboxEvent::query()
             ->where('subject', 'notifications.v1.notification.send')
@@ -150,11 +146,11 @@ class BreakNotifierTest extends TestCase
         $this->evaluate();
 
         $this->assertDatabaseHas('toolbox_outbox_events', ['subject' => 'notifications.testing.v1.notification.send']);
-        $this->assertDatabaseHas('toolbox_outbox_events', ['subject' => 'toolbox.testing.v1.break.milestone_reached']);
+        $this->assertDatabaseMissing('toolbox_outbox_events', ['subject' => 'notifications.v1.notification.send']);
     }
 
     /**
-     * REGRESSION. The announce path runs inside BreakWriteService's transaction
+     * REGRESSION. The announce path runs inside BreakService's transaction
      * and every queue connection has after_commit => false, so without
      * afterCommit() a worker can claim the job before the outbox row commits,
      * find nothing and return silently. The sweeper still recovers it, so the

@@ -118,7 +118,7 @@ class BreakManualEntryTest extends TestCase
      * The existing break belongs to work day 2026-09-15 (it started at 23:00,
      * before the 06:00 cutoff rolls the day). The new entry at 02:00 belongs to
      * 2026-09-16. They are on DIFFERENT work days and still overlap in real
-     * time. Anyone who "optimises" BreakOverlapGuard to filter by work_date
+     * time. Anyone who "optimises" the overlap guard in BreakService to filter by work_date
      * breaks exactly this.
      */
     public function test_overlap_is_detected_across_the_work_day_boundary(): void

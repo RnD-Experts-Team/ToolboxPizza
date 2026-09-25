@@ -4,7 +4,7 @@ namespace App\Console\Commands;
 
 use App\Models\BreakEntry;
 use App\Models\User;
-use App\Services\Breaks\BreakMilestoneEvaluator;
+use App\Services\Breaks\BreakMilestoneService;
 use App\Services\Breaks\WorkDayResolver;
 use Illuminate\Console\Command;
 use Illuminate\Support\Collection;
@@ -30,7 +30,7 @@ class EvaluateBreakMilestonesCommand extends Command
 
     protected $description = 'Evaluate milestone thresholds for every user with a break currently running';
 
-    public function handle(BreakMilestoneEvaluator $milestones, WorkDayResolver $workDays): int
+    public function handle(BreakMilestoneService $milestones, WorkDayResolver $workDays): int
     {
         $dryRun = (bool) $this->option('dry-run');
 

@@ -246,16 +246,18 @@ class TicketNotifierTest extends TestCase
      * Recording the list on the domain event is what keeps the history honest
      * after a re-org that would resolve differently today.
      */
-    public function test_the_domain_event_records_who_was_told_at_the_time(): void
+    public function test_the_notification_records_who_was_told_at_the_time(): void
     {
         $ticket = $this->raise();
 
-        $domain = ToolboxOutboxEvent::query()->where('subject', 'toolbox.v1.ticket.created')->firstOrFail();
+        // Assignment resolves dynamically and the live answer moves with the
+        // org chart, so the envelope's recipient list is the honest record of
+        // who was actually told. There is no parallel toolbox.* event.
+        $sent = ToolboxOutboxEvent::query()->where('subject', 'notifications.v1.notification.send')->firstOrFail();
 
-        $this->assertSame([$this->assignee->id], $domain->payload['data']['recipient_user_ids']);
-        $this->assertSame($ticket->id, $domain->payload['data']['ticket_id']);
-        $this->assertSame($this->store->store_number, $domain->payload['data']['store_number']);
-        $this->assertSame($this->section->key, $domain->payload['data']['section_key']);
+        $this->assertSame([$this->assignee->id], array_column($sent->payload['data']['users'], 'id'));
+        $this->assertSame("/toolbox/tickets/{$ticket->id}", $sent->payload['data']['users'][0]['data']['action_url']);
+        $this->assertSame(0, ToolboxOutboxEvent::query()->where('subject', 'like', 'toolbox.%')->count());
     }
 
     /**

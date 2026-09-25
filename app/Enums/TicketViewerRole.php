@@ -6,7 +6,7 @@ namespace App\Enums;
  * What one user is to one ticket, once every source of authority has been
  * considered.
  *
- * Resolved by TicketAccessResolver, highest power first, so a reporter who also
+ * Resolved by TicketAccessService, highest power first, so a reporter who also
  * happens to be an assignee keeps the assignee's powers. Never stored - it is
  * recomputed per request, because assignment itself is dynamic.
  */

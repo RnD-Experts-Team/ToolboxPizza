@@ -49,7 +49,7 @@ return new class extends Migration
             // partial unique index, and a generated-column index could not
             // express the overlap rule that needs the same lock anyway. Writers
             // serialise on the user's user_break_settings row instead - see
-            // BreakWriteService and that table's migration.
+            // BreakService and that table's migration.
             $table->dateTime('ended_at')->nullable();
 
             // DERIVED from started_at by WorkDayResolver. Stored rather than

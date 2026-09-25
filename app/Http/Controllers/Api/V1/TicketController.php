@@ -2,32 +2,63 @@
 
 namespace App\Http\Controllers\Api\V1;
 
-use App\Http\Controllers\Api\V1\Concerns\ResolvesStore;
-use App\Http\Controllers\Api\V1\Concerns\ResolvesVisibleTicket;
+use App\Enums\TicketParticipantRole;
+use App\Enums\TicketStatus;
 use App\Http\Controllers\Controller;
-use App\Http\Requests\StoreTicketRequest;
-use App\Http\Requests\UpdateTicketRequest;
-use App\Services\Attachments\AttachmentService;
-use App\Services\Tickets\TicketAccessResolver;
+use App\Http\Requests\Api\V1\TicketAttachmentRequest;
+use App\Http\Requests\Api\V1\TicketNoteRequest;
+use App\Http\Requests\Api\V1\TicketParticipantRequest;
+use App\Http\Requests\Api\V1\TicketReopenRequest;
+use App\Http\Requests\Api\V1\TicketResponseRequest;
+use App\Http\Requests\Api\V1\TicketStatusRequest;
+use App\Http\Requests\Api\V1\TicketStoreRequest;
+use App\Http\Requests\Api\V1\TicketUpdateRequest;
+use App\Models\Attachment;
+use App\Models\Store;
+use App\Models\Ticket;
+use App\Models\TicketParticipant;
+use App\Services\Tickets\TicketAccessService;
 use App\Services\Tickets\TicketQueryService;
-use App\Services\Tickets\TicketRecipientResolver;
-use App\Services\Tickets\TicketWriteService;
+use App\Services\Tickets\TicketService;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Throwable;
+use Illuminate\Http\Response;
 
+/**
+ * Raising, reading and working tickets.
+ *
+ * Store-scoped routes carry the store CODE ("03795-00001"). A ticket from
+ * another store is a 404 under this store's path, and so is a ticket the caller
+ * has no relationship to - a 403 would confirm the id exists. Every other
+ * refusal is a 403, because by then the caller can already see the thing.
+ */
 class TicketController extends Controller
 {
-    use ResolvesStore, ResolvesVisibleTicket;
+    private const RELATIONS = ['store', 'section', 'reporter', 'participants.user'];
 
     public function __construct(
-        private readonly TicketWriteService $writer,
+        private readonly TicketService $tickets,
         private readonly TicketQueryService $reader,
-        private readonly TicketAccessResolver $access,
-        private readonly TicketRecipientResolver $recipients,
-        private readonly AttachmentService $attachments,
+        private readonly TicketAccessService $access,
     ) {}
+
+    // -------------------------------------------------------------------------
+    // Lists
+    // -------------------------------------------------------------------------
+
+    /**
+     * The cross-store inbox. Self-scoped in the service, because pizzasys makes
+     * no per-store decision here - there is no store in the path to judge.
+     *
+     * @return LengthAwarePaginator<int, array<string, mixed>>
+     */
+    public function inbox(Request $request): LengthAwarePaginator
+    {
+        return $this->reader->index($request->user(), $request->only([
+            'statuses', 'section_keys', 'section_ids', 'stores', 'reported_by', 'search', 'per_page',
+        ]));
+    }
 
     /**
      * @return LengthAwarePaginator<int, array<string, mixed>>
@@ -37,119 +68,180 @@ class TicketController extends Controller
         return $this->reader->index(
             $request->user(),
             $request->only(['statuses', 'section_keys', 'section_ids', 'reported_by', 'search', 'per_page']),
-            $this->resolveStore($storeId),
+            Store::resolveByNumber($storeId),
         );
     }
 
-    /**
-     * The cross-store inbox.
-     *
-     * Self-scoped in the service, because pizzasys is NOT making a per-store
-     * decision on this route - there is no store in the path for it to judge.
-     *
-     * @return LengthAwarePaginator<int, array<string, mixed>>
-     */
-    public function inbox(Request $request): LengthAwarePaginator
-    {
-        return $this->reader->index(
-            $request->user(),
-            $request->only(['statuses', 'section_keys', 'section_ids', 'stores', 'reported_by', 'search', 'per_page']),
-        );
-    }
+    // -------------------------------------------------------------------------
+    // One ticket
+    // -------------------------------------------------------------------------
 
-    public function store(StoreTicketRequest $request, string $storeId): JsonResponse
+    public function store(TicketStoreRequest $request, string $storeId): JsonResponse
     {
-        $store = $this->resolveStore($storeId);
+        $store = Store::resolveByNumber($storeId);
         $data = $request->validated();
 
-        // Bytes are written BEFORE the transaction opens, so a rollback can
-        // never strand them - the catch below unlinks what the transaction did
-        // not keep. MaintenancePizza uploads inside the transaction and leaks
-        // on every failure.
-        $staged = $this->attachments->stage((array) $request->file('files', []));
-        $stagedNotes = [];
+        $noteFiles = [];
 
-        foreach ($data['notes'] ?? [] as $i => $note) {
-            $stagedNotes[$i] = $this->attachments->stage((array) $request->file("notes.{$i}.files", []));
+        foreach (array_keys($data['notes'] ?? []) as $i) {
+            $noteFiles[$i] = (array) $request->file("notes.{$i}.files", []);
         }
 
-        try {
-            $ticket = $this->writer->create($request->user(), $store, $data, $staged, $stagedNotes);
-        } catch (Throwable $e) {
-            $this->attachments->discard(array_merge($staged, ...array_values($stagedNotes)));
-
-            throw $e;
-        }
-
-        $ticket->load(['store', 'section', 'reporter', 'participants.user']);
-
-        $recipients = $this->recipients->assigneesFor($ticket->section, $store);
+        $ticket = $this->tickets->create($request->user(), $store, $data, (array) $request->file('files', []), $noteFiles);
+        $ticket->load(self::RELATIONS);
 
         return response()->json([
             'data' => $this->reader->present($ticket, $request->user(), full: true) + [
                 // Not an error when empty - refusing the ticket would throw away
                 // someone's report because of an admin's configuration gap.
-                'warnings' => $recipients === [] ? ['no_recipients'] : [],
+                'warnings' => $this->access->assigneesFor($ticket->section, $store) === [] ? ['no_recipients'] : [],
             ],
         ], 201);
     }
 
-    /**
-     * @return array<string, mixed>
-     */
-    public function show(Request $request, string $storeId, int $ticketId): array
+    public function show(Request $request, string $storeId, int $ticketId): JsonResponse
     {
-        $ticket = $this->visibleTicket($this->resolveStore($storeId), $ticketId);
+        $ticket = $this->visible($request, $storeId, $ticketId)->load([
+            'responses.author', 'responses.attachments.creator',
+            'notes.attachments.creator', 'notes.creator',
+            'attachments.creator', 'statusChanges.creator',
+        ]);
 
-        $ticket->load(['responses.author', 'responses.attachments.creator', 'notes.attachments.creator', 'notes.creator', 'attachments.creator', 'statusChanges.creator']);
-
-        return ['data' => $this->reader->present($ticket, $request->user(), full: true)];
+        return response()->json(['data' => $this->reader->present($ticket, $request->user(), full: true)]);
     }
 
-    /**
-     * @return array<string, mixed>
-     */
-    public function update(UpdateTicketRequest $request, string $storeId, int $ticketId): array
+    public function update(TicketUpdateRequest $request, string $storeId, int $ticketId): JsonResponse
     {
-        $ticket = $this->visibleTicket($this->resolveStore($storeId), $ticketId);
-        $data = $request->validated();
+        $ticket = $this->tickets->update($request->user(), $this->visible($request, $storeId, $ticketId), $request->validated());
 
-        $this->access->assertCan('edit', $request->user(), $ticket);
+        return $this->presented($request, $ticket->load(self::RELATIONS));
+    }
 
-        // Re-sectioning re-routes the ticket to a different audience, so it is
-        // an assignee's call rather than the reporter's - even while the
-        // reporter may still edit the wording.
-        if (array_key_exists('section_key', $data)) {
-            $this->access->assertCan('change status', $request->user(), $ticket);
-        }
+    public function changeStatus(TicketStatusRequest $request, string $storeId, int $ticketId): JsonResponse
+    {
+        $ticket = $this->visible($request, $storeId, $ticketId);
 
-        $ticket = $this->writer->update($ticket, $data);
-
-        return ['data' => $this->reader->present(
-            $ticket->load(['store', 'section', 'reporter', 'participants.user']),
+        $this->tickets->changeStatus(
             $request->user(),
-        )];
+            $ticket,
+            TicketStatus::from($request->validated('status')),
+            $request->validated('reason'),
+        );
+
+        return $this->presented($request, $ticket->refresh()->load(self::RELATIONS));
     }
 
     /**
-     * Who this ticket reaches, and why.
-     *
-     * Makes the resolution observable: an admin looking at a surprising
-     * recipient list can see whether each person came from the section itself or
-     * from a level above it.
-     *
-     * @return array<string, mixed>
+     * Its own endpoint rather than just another status value: reopening always
+     * needs a reason, and it means something different to everyone watching.
      */
-    public function recipients(Request $request, string $storeId, int $ticketId): array
+    public function reopen(TicketReopenRequest $request, string $storeId, int $ticketId): JsonResponse
     {
-        $store = $this->resolveStore($storeId);
-        $ticket = $this->visibleTicket($store, $ticketId);
+        $ticket = $this->visible($request, $storeId, $ticketId);
 
-        $resolved = $this->recipients->assigneesFor($ticket->section, $store);
+        $this->tickets->reopen($request->user(), $ticket, (string) $request->validated('reason'));
 
-        return ['data' => [
-            'user_ids' => $resolved,
-            'candidates' => $this->recipients->candidatesFor($ticket->section),
-        ]];
+        return $this->presented($request, $ticket->refresh()->load(self::RELATIONS));
+    }
+
+    /**
+     * Who this ticket reaches, and why - so an admin looking at a surprising
+     * recipient list can see whether each person came from the section itself
+     * or from a level above it.
+     */
+    public function recipients(Request $request, string $storeId, int $ticketId): JsonResponse
+    {
+        $ticket = $this->visible($request, $storeId, $ticketId);
+
+        return response()->json(['data' => [
+            'user_ids' => $this->access->assigneesFor($ticket->section, $ticket->store),
+            'candidates' => $this->access->candidatesFor($ticket->section),
+        ]]);
+    }
+
+    // -------------------------------------------------------------------------
+    // The thread
+    // -------------------------------------------------------------------------
+
+    public function respond(TicketResponseRequest $request, string $storeId, int $ticketId): JsonResponse
+    {
+        $response = $this->tickets->respond(
+            $request->user(),
+            $this->visible($request, $storeId, $ticketId),
+            (string) $request->validated('body'),
+            (array) $request->file('files', []),
+        );
+
+        return response()->json(['data' => $this->reader->presentResponse($response)], 201);
+    }
+
+    public function storeNote(TicketNoteRequest $request, string $storeId, int $ticketId): JsonResponse
+    {
+        $note = $this->tickets->addNote(
+            $request->user(),
+            $this->visible($request, $storeId, $ticketId),
+            (string) $request->validated('body'),
+            (array) $request->file('files', []),
+        );
+
+        return response()->json(['data' => $this->reader->presentNote($note)], 201);
+    }
+
+    public function storeAttachments(TicketAttachmentRequest $request, string $storeId, int $ticketId): JsonResponse
+    {
+        $created = $this->tickets->addAttachments(
+            $request->user(),
+            $this->visible($request, $storeId, $ticketId),
+            (array) $request->file('files', []),
+        );
+
+        return response()->json([
+            'data' => array_map(fn (Attachment $a) => $this->reader->presentAttachment($a), $created),
+        ], 201);
+    }
+
+    // -------------------------------------------------------------------------
+    // Participants
+    // -------------------------------------------------------------------------
+
+    public function participants(Request $request, string $storeId, int $ticketId): JsonResponse
+    {
+        $ticket = $this->visible($request, $storeId, $ticketId);
+
+        return response()->json(['data' => $ticket->participants()->with('user')->orderBy('id')->get()
+            ->map(fn (TicketParticipant $p) => $this->reader->presentParticipant($p))
+            ->all()]);
+    }
+
+    /**
+     * Re-adding someone changes their role rather than stacking a second grant.
+     */
+    public function addParticipant(TicketParticipantRequest $request, string $storeId, int $ticketId): JsonResponse
+    {
+        $participant = $this->tickets->addParticipant(
+            $request->user(),
+            $this->visible($request, $storeId, $ticketId),
+            (int) $request->validated('user_id'),
+            TicketParticipantRole::from($request->validated('role')),
+        );
+
+        return response()->json(['data' => $this->reader->presentParticipant($participant)], 201);
+    }
+
+    public function removeParticipant(Request $request, string $storeId, int $ticketId, int $userId): Response
+    {
+        $this->tickets->removeParticipant($request->user(), $this->visible($request, $storeId, $ticketId), $userId);
+
+        return response()->noContent();
+    }
+
+    private function visible(Request $request, string $storeId, int $ticketId): Ticket
+    {
+        return $this->access->findVisible($request->user(), Store::resolveByNumber($storeId), $ticketId);
+    }
+
+    private function presented(Request $request, Ticket $ticket): JsonResponse
+    {
+        return response()->json(['data' => $this->reader->present($ticket, $request->user())]);
     }
 }

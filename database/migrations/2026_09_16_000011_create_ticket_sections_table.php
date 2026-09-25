@@ -26,7 +26,7 @@ return new class extends Migration
 
             // A retired section keeps resolving for the tickets that already
             // point at it; only NEW tickets are refused. Same split as
-            // BreakWriteService::resolveType($forNewEntry) - history must keep
+            // BreakService::resolveType($forNewEntry) - history must keep
             // rendering after the catalog moves on.
             $table->boolean('active')->default(true);
 

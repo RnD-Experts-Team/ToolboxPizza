@@ -26,6 +26,19 @@ class UserBreakSetting extends Model
         ];
     }
 
+    /**
+     * The user's row, created on first touch from the configured default - so a
+     * client never runs a setup step, and so the row exists before anything
+     * tries to lock it.
+     */
+    public static function forUser(User $user): self
+    {
+        return self::query()->firstOrCreate(
+            ['user_id' => $user->id],
+            ['daily_allowance_minutes' => (int) config('toolbox.breaks.default_daily_allowance_minutes')],
+        );
+    }
+
     /** @return BelongsTo<User, $this> */
     public function user(): BelongsTo
     {

@@ -67,4 +67,30 @@ class Attachment extends Model
     {
         return Storage::disk($this->disk ?: 'public')->url($this->path);
     }
+
+    /**
+     * The validation for one uploaded file, shared by every request that takes
+     * files.
+     *
+     * The allowlist and the count cap are the difference between "public files"
+     * and "public executable files": MaintenancePizza validates size alone on a
+     * publicly-served disk, so an uploaded .html or .svg becomes stored XSS on
+     * our own origin. `mimetypes:`, NOT `mimes:` - the check is on the sniffed
+     * content, never on a client-supplied extension.
+     *
+     * @return array<int, string>
+     */
+    public static function fileRules(): array
+    {
+        return [
+            'file',
+            'max:'.(int) config('toolbox.tickets.attachments.max_kilobytes'),
+            'mimetypes:'.implode(',', (array) config('toolbox.tickets.attachments.allowed_mimetypes')),
+        ];
+    }
+
+    public static function maxPerRequest(): int
+    {
+        return (int) config('toolbox.tickets.attachments.max_per_request');
+    }
 }

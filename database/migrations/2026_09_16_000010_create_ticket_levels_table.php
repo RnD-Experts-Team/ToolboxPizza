@@ -23,9 +23,9 @@ return new class extends Migration
             // whole subtree out of existence - losing one level should not
             // silently unassign everyone below it.
             //
-            // THE DATABASE CANNOT EXPRESS "no cycles". TicketLevelService
+            // THE DATABASE CANNOT EXPRESS "no cycles". TicketCatalogService
             // refuses a parent that is the node itself or any descendant, and
-            // TicketLevelGraph's walks carry a visited set as a seatbelt for a
+            // TicketAccessService's walks carry a visited set as a seatbelt for a
             // cycle that arrives any other way (a seeder, a manual UPDATE, a
             // restored backup). Neither is redundant: one prevents, one contains.
             $table->foreignId('parent_id')->nullable()->constrained('ticket_levels')->nullOnDelete();

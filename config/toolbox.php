@@ -50,7 +50,7 @@ return [
     | is recorded in break_milestone_firings either way; this only decides
     | whether an outbox row is written for it.
     |
-    | When enabled, BreakNotifier writes a notifications.v1.notification.send
+    | When enabled, BreakMilestoneService writes a notifications.v1.notification.send
     | envelope onto the outbox inside the same transaction as the firing row;
     | NotificationsPizza consumes it and broadcasts over ITS Reverb. Nothing
     | about Reverb, Echo or Pusher belongs in this service.

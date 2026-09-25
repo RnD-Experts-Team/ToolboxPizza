@@ -2,7 +2,6 @@
 
 namespace App\Models;
 
-use App\Models\Concerns\ReplicatedModel;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 
@@ -15,7 +14,13 @@ use Illuminate\Foundation\Auth\User as Authenticatable;
 #[Fillable(['id', 'name', 'email', 'image_path'])]
 class User extends Authenticatable
 {
-    use ReplicatedModel;
+    /**
+     * Rows arrive over NATS carrying the source service's primary key, so the
+     * id is supplied, never generated.
+     */
+    public $incrementing = false;
+
+    protected $keyType = 'int';
 
     /**
      * Nothing to cast: this table holds identity only. Verification state,

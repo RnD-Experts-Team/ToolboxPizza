@@ -1,6 +1,5 @@
 <?php
 
-use App\Exceptions\Renderers\ToolboxExceptionRenderer;
 use App\Http\Middleware\AuthTokenStoreScopeMiddleware;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -20,17 +19,10 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
+        // Domain failures (App\Exceptions\ToolboxException) render themselves
+        // as {"message", "error": {"code", ...}}; everything else under api/*
+        // comes back as JSON rather than an HTML error page.
         $exceptions->shouldRenderJsonWhen(
             fn (Request $request) => $request->is('api/*'),
         );
-
-        // Domain failures carry an error code the UI branches on; without this
-        // they'd surface as an opaque 500.
-        $exceptions->render(function (Throwable $e, Request $request) {
-            if (! $request->is('api/*')) {
-                return null;
-            }
-
-            return app(ToolboxExceptionRenderer::class)->render($e);
-        });
     })->create();

@@ -2,11 +2,11 @@
 
 namespace App\Models;
 
-use App\Models\Concerns\HasAttachments;
 use Database\Factories\TicketResponseFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 /**
@@ -15,7 +15,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 class TicketResponse extends Model
 {
     /** @use HasFactory<TicketResponseFactory> */
-    use HasAttachments, HasFactory, SoftDeletes;
+    use HasFactory, SoftDeletes;
 
     protected $fillable = [
         'ticket_id',
@@ -33,5 +33,16 @@ class TicketResponse extends Model
     public function author(): BelongsTo
     {
         return $this->belongsTo(User::class, 'user_id');
+    }
+
+    /**
+     * Files. Polymorphic, so NOTHING CASCADES: every deletion path has to remove
+     * them itself, and attachments:prune sweeps whatever slips through.
+     *
+     * @return MorphMany<Attachment, $this>
+     */
+    public function attachments(): MorphMany
+    {
+        return $this->morphMany(Attachment::class, 'attachable');
     }
 }

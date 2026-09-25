@@ -3,7 +3,6 @@
 namespace App\Models;
 
 use App\Enums\BreakSource;
-use App\Models\Concerns\HasNotes;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Database\Factories\BreakEntryFactory;
@@ -12,6 +11,7 @@ use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\MorphMany;
 
 /**
  * One break.
@@ -24,7 +24,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 class BreakEntry extends Model
 {
     /** @use HasFactory<BreakEntryFactory> */
-    use HasFactory, HasNotes;
+    use HasFactory;
 
     protected $fillable = [
         'user_id',
@@ -82,6 +82,17 @@ class BreakEntry extends Model
     public function breakType(): BelongsTo
     {
         return $this->belongsTo(BreakType::class);
+    }
+
+    /**
+     * Free-text notes. Polymorphic, so NOTHING CASCADES: deleting a break has to
+     * remove its notes itself.
+     *
+     * @return MorphMany<Note, $this>
+     */
+    public function notes(): MorphMany
+    {
+        return $this->morphMany(Note::class, 'notable');
     }
 
     public function isRunning(): bool

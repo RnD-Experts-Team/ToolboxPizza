@@ -115,7 +115,7 @@ class AttachmentPruneTest extends TestCase
     {
         $attachment = $this->attach();
 
-        // Straight to the table, bypassing TicketWriteService::delete() - that
+        // Straight to the table, bypassing TicketService::delete() - that
         // is exactly the situation this pass exists for.
         Ticket::query()->whereKey($this->ticket->id)->forceDelete();
 

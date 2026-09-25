@@ -18,7 +18,7 @@ return new class extends Migration
             // handler edit away from being clobbered.
             //
             // This row is also the LOCK TARGET for the "one open break at a
-            // time" invariant — BreakWriteService takes SELECT ... FOR UPDATE on
+            // time" invariant — BreakService takes SELECT ... FOR UPDATE on
             // it before looking for an open break, because MySQL has no partial
             // unique index that could express "at most one NULL ended_at per
             // user". That makes the row load-bearing: it must EXIST before the

@@ -25,6 +25,21 @@ class BreakMilestone extends Model
         ];
     }
 
+    /**
+     * The user's thresholds in minutes, ascending.
+     *
+     * @return array<int, int>
+     */
+    public static function thresholdsFor(User $user): array
+    {
+        return self::query()
+            ->where('user_id', $user->id)
+            ->orderBy('threshold_minutes')
+            ->pluck('threshold_minutes')
+            ->map(fn ($m) => (int) $m)
+            ->all();
+    }
+
     /** @return BelongsTo<User, $this> */
     public function user(): BelongsTo
     {

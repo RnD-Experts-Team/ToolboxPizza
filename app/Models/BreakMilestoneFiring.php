@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Enums\MilestoneKind;
 use Carbon\CarbonImmutable;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
@@ -48,6 +49,19 @@ class BreakMilestoneFiring extends Model
     public function setWorkDateAttribute(mixed $value): void
     {
         $this->attributes['work_date'] = CarbonImmutable::parse($value)->format('Y-m-d');
+    }
+
+    /**
+     * @return Collection<int, self>
+     */
+    public static function forDay(User $user, string $workDate): Collection
+    {
+        return self::query()
+            ->where('user_id', $user->id)
+            ->where('work_date', $workDate)
+            ->orderBy('threshold_minutes')
+            ->orderBy('kind')
+            ->get();
     }
 
     /** @return BelongsTo<User, $this> */

@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
- * One move in a ticket's life. Written by TicketStatusService and nowhere else.
+ * One move in a ticket's life. Written by TicketService::changeStatus() and nowhere else.
  */
 class TicketStatusChange extends Model
 {
