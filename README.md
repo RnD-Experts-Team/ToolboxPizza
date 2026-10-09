@@ -199,21 +199,25 @@ STORE_NOT_FOUND`.
 ### Before any endpoint answers
 
 1. `AUTH_SERVER_*` must point at pizzasys, and pizzasys must hold an auth-rule
-   row for each path — otherwise `ext.authorized` is false and everything 403s.
-   **Run `php artisan db:seed --class=ToolboxServiceSeeder` in the pizzasys
-   repo** (not this one). It registers the `Toolbox` service client — printing
-   `AUTH_SERVER_CALL_TOKEN` **once**, put it straight into this service's `.env`
-   — creates `view tickets` / `manage tickets` / `administer tickets`, writes 30
-   rules covering both modules, and bumps `authz:ver` so they go live at once.
-   It does **not** attach the permissions to any role: `view`/`manage tickets`
-   are checked **per store**, so they must come from the role a user holds *for
-   that store*, while `administer tickets` is checked globally.
-2. **The workbook routes are not in that seeder yet.** Until they are, every one
-   of them 403s. They need three permissions: `view workbooks` (global,
-   `store_scope_mode: none`) on every `GET`; `create workbooks` (per store,
-   `store_scope_mode: scoped`) on the three `stores/{storeId}/…` creates; and
-   `manage workbooks` (global) on every other `POST`/`DELETE`. The last one is
-   global deliberately - see limitation 3 under Workbooks.
+   row for each path. **In the pizzasys repo** (not this one) run
+   `php artisan db:seed --class=RolesAndPermissionsSeeder`, then
+   `php artisan db:seed --class=ToolboxServiceSeeder`. The second registers the
+   `Toolbox` service client — printing `AUTH_SERVER_CALL_TOKEN` **once**, put it
+   straight into this service's `.env` — and writes one rule per route
+   (`database/seeders/AuthRules/ToolboxAuthRulesSeeder.php`).
+2. pizzasys gates only what this service cannot decide itself:
+   - `view tickets` (**per store**) — `GET /stores/{storeId}/tickets`, the
+     unfiltered store queue;
+   - `administer tickets` (**global**) — every ticket-section, ticket-level and
+     ticket-assignment route except `GET /ticket-sections` (every user's picker);
+   - `create workbooks` (**per store**) — the three `stores/{storeId}/…`
+     workbook creates.
+
+   Everything else — breaks, the inbox, raising a ticket, every per-ticket route
+   and every other workbook route — needs only a signed-in user; the local
+   ticket matrix and workbook visibility tags are the authority there.
+   `RolesAndPermissionsSeeder` grants `view tickets` and `create workbooks` to
+   **Store Manager**; `administer tickets` is assigned to HQ users by hand.
 3. `AUTH_SERVER_SERVICE_NAME` (default `Toolbox`) must match the `service`
    string the dashboard passes to `canAccessRoute({ service: ... })`.
 4. Streams and durable consumers are created **manually** via the NATS CLI; the
