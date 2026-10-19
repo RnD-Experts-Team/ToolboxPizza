@@ -19,8 +19,13 @@ use Illuminate\Support\Facades\Route;
 |
 | House conventions in force: every route is named, and UPDATES ARE POST - not
 | PUT/PATCH - across these services.
+|
+| Rate limits (AppServiceProvider): `throttle:api` covers every route, ahead of
+| the pizzasys call. Routes that export, upload or rewrite a whole subtree add
+| their own tier on top. Poll routes REPLACE it with `api-poll` instead, since
+| the general read limit is lower and would cap them.
 */
-Route::prefix('v1')->middleware('auth.token.store')->group(function () {
+Route::prefix('v1')->middleware(['throttle:api', 'auth.token.store'])->group(function () {
 
     /*
     |--------------------------------------------------------------------------
@@ -58,14 +63,14 @@ Route::prefix('v1')->middleware('auth.token.store')->group(function () {
     | before that filter could.
     |--------------------------------------------------------------------------
     */
-    Route::get('breaks/active', [BreakController::class, 'active'])->name('api.v1.breaks.active');
+    Route::get('breaks/active', [BreakController::class, 'active'])->withoutMiddleware('throttle:api')->middleware('throttle:api-poll')->name('api.v1.breaks.active');
     Route::post('breaks/start', [BreakController::class, 'start'])->name('api.v1.breaks.start');
 
     // The day breakdown, and the same payload plus the paste-ready `text`.
     // Two endpoints rather than one ?format= because the day view is the one a
     // client polls, and it should not render a document on every tick.
-    Route::get('breaks/day', [BreakController::class, 'day'])->name('api.v1.breaks.day');
-    Route::get('breaks/day/export', [BreakController::class, 'export'])->name('api.v1.breaks.day.export');
+    Route::get('breaks/day', [BreakController::class, 'day'])->withoutMiddleware('throttle:api')->middleware('throttle:api-poll')->name('api.v1.breaks.day');
+    Route::get('breaks/day/export', [BreakController::class, 'export'])->middleware('throttle:api-export')->name('api.v1.breaks.day.export');
 
     Route::get('breaks', [BreakController::class, 'index'])->name('api.v1.breaks.index');
     // The forgot-to-time entry: both ends supplied by hand.
@@ -139,14 +144,14 @@ Route::prefix('v1')->middleware('auth.token.store')->group(function () {
     // The cross-store inbox. Declared before the store-scoped group so it is
     // never shadowed. pizzasys makes no per-store decision here - there is no
     // store in the path - so TicketQueryService scopes it to the caller itself.
-    Route::get('tickets', [TicketController::class, 'inbox'])->name('api.v1.tickets.inbox');
+    Route::get('tickets', [TicketController::class, 'inbox'])->withoutMiddleware('throttle:api')->middleware('throttle:api-poll')->name('api.v1.tickets.inbox');
 
     Route::prefix('stores/{storeId}')->group(function () {
         Route::get('tickets', [TicketController::class, 'index'])->name('api.v1.stores.tickets.index');
-        Route::post('tickets', [TicketController::class, 'store'])->name('api.v1.stores.tickets.store');
+        Route::post('tickets', [TicketController::class, 'store'])->middleware('throttle:api-upload')->name('api.v1.stores.tickets.store');
 
         Route::get('tickets/{ticketId}', [TicketController::class, 'show'])
-            ->whereNumber('ticketId')->name('api.v1.stores.tickets.show');
+            ->whereNumber('ticketId')->withoutMiddleware('throttle:api')->middleware('throttle:api-poll')->name('api.v1.stores.tickets.show');
         Route::post('tickets/{ticketId}', [TicketController::class, 'update'])
             ->whereNumber('ticketId')->name('api.v1.stores.tickets.update');
 
@@ -156,11 +161,11 @@ Route::prefix('v1')->middleware('auth.token.store')->group(function () {
             ->whereNumber('ticketId')->name('api.v1.stores.tickets.reopen');
 
         Route::post('tickets/{ticketId}/responses', [TicketController::class, 'respond'])
-            ->whereNumber('ticketId')->name('api.v1.stores.tickets.responses.store');
+            ->whereNumber('ticketId')->middleware('throttle:api-upload')->name('api.v1.stores.tickets.responses.store');
         Route::post('tickets/{ticketId}/notes', [TicketController::class, 'storeNote'])
-            ->whereNumber('ticketId')->name('api.v1.stores.tickets.notes.store');
+            ->whereNumber('ticketId')->middleware('throttle:api-upload')->name('api.v1.stores.tickets.notes.store');
         Route::post('tickets/{ticketId}/attachments', [TicketController::class, 'storeAttachments'])
-            ->whereNumber('ticketId')->name('api.v1.stores.tickets.attachments.store');
+            ->whereNumber('ticketId')->middleware('throttle:api-upload')->name('api.v1.stores.tickets.attachments.store');
 
         Route::get('tickets/{ticketId}/participants', [TicketController::class, 'participants'])
             ->whereNumber('ticketId')->name('api.v1.stores.tickets.participants.index');
@@ -231,7 +236,7 @@ Route::prefix('v1')->middleware('auth.token.store')->group(function () {
     // Takes the whole subtree. Refuses a populated folder without ?force=true,
     // and says how much is inside so the UI can put a number in the prompt.
     Route::delete('workbook-folders/{folderId}', [WorkbookController::class, 'destroyFolder'])
-        ->whereNumber('folderId')->name('api.v1.workbook-folders.destroy');
+        ->whereNumber('folderId')->middleware('throttle:api-heavy')->name('api.v1.workbook-folders.destroy');
 
     Route::get('workbook-folders/{folderId}/workbooks', [WorkbookController::class, 'index'])
         ->whereNumber('folderId')->name('api.v1.workbooks.index');
@@ -250,14 +255,14 @@ Route::prefix('v1')->middleware('auth.token.store')->group(function () {
     Route::get('workbooks/{workbookId}/columns', [WorkbookController::class, 'columns'])
         ->whereNumber('workbookId')->name('api.v1.workbooks.columns.index');
     Route::post('workbooks/{workbookId}/columns', [WorkbookController::class, 'replaceColumns'])
-        ->whereNumber('workbookId')->name('api.v1.workbooks.columns.replace');
+        ->whereNumber('workbookId')->middleware('throttle:api-heavy')->name('api.v1.workbooks.columns.replace');
 
     // The literal segment is declared BEFORE rows/{rowId} so 'reorder' can
     // never be swallowed as an id.
     Route::get('workbooks/{workbookId}/rows', [WorkbookRowController::class, 'index'])
         ->whereNumber('workbookId')->name('api.v1.workbooks.rows.index');
     Route::post('workbooks/{workbookId}/rows/reorder', [WorkbookRowController::class, 'reorder'])
-        ->whereNumber('workbookId')->name('api.v1.workbooks.rows.reorder');
+        ->whereNumber('workbookId')->middleware('throttle:api-heavy')->name('api.v1.workbooks.rows.reorder');
     Route::get('workbooks/{workbookId}/rows/{rowId}', [WorkbookRowController::class, 'show'])
         ->whereNumber('workbookId')->whereNumber('rowId')->name('api.v1.workbooks.rows.show');
     Route::post('workbooks/{workbookId}/rows/{rowId}', [WorkbookRowController::class, 'update'])

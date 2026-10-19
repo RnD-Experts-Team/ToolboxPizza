@@ -47,6 +47,12 @@ class AuthTokenStoreScopeMiddleware
             $storeContext,
         );
 
+        // pizzasys could not judge the token (busy, down, rate-limiting us).
+        // That is not the caller's fault: a 401 would log them out.
+        if ($verify['unavailable'] ?? false) {
+            abort(503, 'Auth server unavailable', ['Retry-After' => '5']);
+        }
+
         // 5) Enforce BOTH token validity + authorization decision
         $active = (bool) ($verify['active'] ?? false);
         $authorized = (bool) data_get($verify, 'ext.authorized', false);

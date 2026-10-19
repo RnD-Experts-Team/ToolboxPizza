@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\Http;
 
 /**
@@ -9,10 +10,14 @@ use Illuminate\Support\Facades\Http;
  * method on THIS path, given this store context?".
  *
  * Shared by the auth middleware (the request being served) and by the ticket
- * visibility check (a question about a DIFFERENT path - may the caller list a
+ * queue check (a question about a DIFFERENT path - may the caller list a
  * store's tickets - asked on behalf of the request being served).
  *
- * Any failure answers ['active' => false]: callers treat that as "no".
+ * pizzasys answers 200 for every token it could judge, valid or not. Anything
+ * else - a 429, a 5xx, a timeout - means it could not judge, and comes back as
+ * ['active' => false, 'unavailable' => true]: callers that only ask "yes or
+ * no?" still get "no", and the middleware turns it into a 503 rather than a
+ * 401, so a busy auth server does not log people out.
  */
 class AuthServerClient
 {
@@ -36,26 +41,34 @@ class AuthServerClient
             'store_context' => $storeContext,
         ];
 
+        $unavailable = ['active' => false, 'unavailable' => true];
+
         try {
             $http = Http::timeout((int) ($cfg['timeout'] ?? 3))
                 ->acceptJson()
                 ->withToken((string) ($cfg['call_token'] ?? ''));
 
             if ($retries > 0) {
-                $http = $http->retry($retries, (int) ($cfg['retry_ms'] ?? 100));
+                // Never retry a 429: pizzasys is asking us to back off.
+                $http = $http->retry(
+                    $retries,
+                    (int) ($cfg['retry_ms'] ?? 100),
+                    fn ($e) => ! ($e instanceof RequestException && $e->response->status() === 429),
+                    throw: false,
+                );
             }
 
             $resp = $http->post($endpoint, $payload);
 
             if (! $resp->ok()) {
-                return ['active' => false];
+                return $unavailable;
             }
 
             $data = $resp->json();
 
-            return is_array($data) ? $data : ['active' => false];
+            return is_array($data) ? $data : $unavailable;
         } catch (\Throwable $e) {
-            return ['active' => false];
+            return $unavailable;
         }
     }
 }

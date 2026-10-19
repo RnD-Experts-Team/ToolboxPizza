@@ -45,7 +45,7 @@ trait FakesAuthServer
     {
         config([
             'services.auth_server.base_url' => 'http://auth.test',
-            'services.auth_server.verify_path' => '/api/v1/auth/token/verify',
+            'services.auth_server.verify_path' => '/api/v1/auth/token-verify',
             'services.auth_server.service_name' => 'Toolbox',
             'services.auth_server.call_token' => 'service-token',
         ]);
