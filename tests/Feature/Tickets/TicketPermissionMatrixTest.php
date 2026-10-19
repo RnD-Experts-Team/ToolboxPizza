@@ -99,6 +99,72 @@ class TicketPermissionMatrixTest extends TestCase
         $this->getJson($this->url(), $this->headers())->assertStatus(404);
     }
 
+    /**
+     * The super-admin holds every permission, `view tickets` included, and has
+     * no relationship to any ticket. They must still open one - read-only.
+     */
+    public function test_a_global_view_tickets_holder_can_see_it_but_only_see_it(): void
+    {
+        $admin = $this->makeUser(63, 'Super');
+        $this->tokenPermissions = ['view tickets'];
+        $this->fakeAuthServer($admin);
+
+        $this->getJson($this->url(), $this->headers())
+            ->assertOk()
+            ->assertJsonPath('data.viewer.role', 'viewer')
+            ->assertJsonPath('data.viewer.can.view', true)
+            ->assertJsonPath('data.viewer.can.respond', false)
+            ->assertJsonPath('data.viewer.can.change_status', false);
+
+        $this->postJson($this->url('/responses'), ['body' => 'hi'], $this->headers())
+            ->assertStatus(403)
+            ->assertJsonPath('error.ability', 'respond');
+    }
+
+    /**
+     * A worker's `view tickets` comes through a store role, so it is not in
+     * the token's permissions: pizzasys' per-store check is what says so.
+     */
+    public function test_a_store_scoped_view_tickets_holder_can_see_it_at_their_store(): void
+    {
+        $user = $this->makeUser(65, 'Manager');
+        $this->grantStore($user);
+        $this->tokenQueueStoreIds = [$this->store->id];
+        $this->fakeAuthServer($user);
+
+        $this->getJson($this->url(), $this->headers())
+            ->assertOk()
+            ->assertJsonPath('data.viewer.role', 'viewer')
+            ->assertJsonPath('data.viewer.can.respond', false);
+    }
+
+    public function test_a_store_scoped_holder_for_another_store_still_gets_404(): void
+    {
+        $user = $this->makeUser(66, 'Manager');
+        $this->grantStore($user);
+        $this->tokenQueueStoreIds = [$this->otherStore->id];
+        $this->fakeAuthServer($user);
+
+        $this->getJson($this->url(), $this->headers())->assertStatus(404);
+    }
+
+    public function test_a_stranger_pizzasys_does_not_vouch_for_stays_a_404(): void
+    {
+        $this->actAsStranger();
+
+        $this->getJson($this->url(), $this->headers())->assertStatus(404);
+    }
+
+    public function test_a_real_relationship_outranks_the_viewer_role(): void
+    {
+        $this->tokenPermissions = ['view tickets'];
+        $this->fakeAuthServer($this->reporter);
+
+        $this->getJson($this->url(), $this->headers())
+            ->assertOk()
+            ->assertJsonPath('data.viewer.role', 'reporter');
+    }
+
     public function test_the_reporter_can_see_it(): void
     {
         $this->actAsReporter();
