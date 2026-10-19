@@ -3,11 +3,11 @@
 namespace App\Http\Middleware;
 
 use App\Models\User;
+use App\Services\AuthServerClient;
 use Closure;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\Http;
 use Symfony\Component\HttpFoundation\Response;
 
 class AuthTokenStoreScopeMiddleware
@@ -28,11 +28,6 @@ class AuthTokenStoreScopeMiddleware
         $serviceName = (string) ($cfg['service_name'] ?? '');
         $callToken = (string) ($cfg['call_token'] ?? '');
 
-        $timeout = (int) ($cfg['timeout'] ?? 3);
-        $retries = (int) ($cfg['retries'] ?? 1);
-        $retryMs = (int) ($cfg['retry_ms'] ?? 100);
-        $cacheTtl = (int) ($cfg['cache_ttl'] ?? 30);
-
         if ($baseUrl === '' || $verifyPath === '' || $serviceName === '' || $callToken === '') {
             abort(500, 'Auth server config missing: services.auth_server.*');
         }
@@ -44,33 +39,13 @@ class AuthTokenStoreScopeMiddleware
         // $cache = Cache::store('redis');
         // $cacheKey = $this->verifyCacheKey($serviceName, $userToken, $request, $storeContext);
 
-        $verify =
-            // $cache->remember($cacheKey, $cacheTtl, function () use (
-            //     $baseUrl,
-            //     $verifyPath,
-            //     $serviceName,
-            //     $callToken,
-            //     $timeout,
-            //     $retries,
-            //     $retryMs,
-            //     $userToken,
-            //     $request,
-            //     $storeContext
-            // ) {
-            //     return
-            $this->verifyWithAuthServer(
-                $baseUrl,
-                $verifyPath,
-                $serviceName,
-                $callToken,
-                $timeout,
-                $retries,
-                $retryMs,
-                $userToken,
-                $request,
-                $storeContext
-            );
-        // });
+        $verify = app(AuthServerClient::class)->verify(
+            $userToken,
+            $request->method(),
+            $request->path(),
+            $request->route()?->getName(),
+            $storeContext,
+        );
 
         // 5) Enforce BOTH token validity + authorization decision
         $active = (bool) ($verify['active'] ?? false);
@@ -281,56 +256,5 @@ class AuthTokenStoreScopeMiddleware
         $ctxSig = hash('sha256', $ctxJson);
 
         return 'toolbox:authz:verify:'.hash('sha256', $serviceName.'|'.$tokenHash.'|'.$method.'|'.$path.'|'.$routeName.'|'.$ctxSig);
-    }
-
-    /**
-     * Calls Auth Server TokenVerifyController endpoint.
-     * - Authorization header MUST be the SERVICE call token
-     * - user token is sent in JSON body as "token"
-     */
-    private function verifyWithAuthServer(
-        string $baseUrl,
-        string $verifyPath,
-        string $serviceName,
-        string $callToken,
-        int $timeout,
-        int $retries,
-        int $retryMs,
-        string $userToken,
-        Request $request,
-        array $storeContext
-    ): array {
-        $endpoint = rtrim($baseUrl, '/').'/'.ltrim($verifyPath, '/');
-
-        $payload = [
-            'service' => $serviceName,
-            'token' => $userToken,
-            'method' => strtoupper((string) $request->method()),
-            'path' => '/'.ltrim((string) $request->path(), '/'),
-            'route_name' => (string) ($request->route()?->getName() ?? null),
-            'store_context' => $storeContext,
-        ];
-
-        try {
-            $http = Http::timeout($timeout)
-                ->acceptJson()
-                ->withToken($callToken);
-
-            if ($retries > 0) {
-                $http = $http->retry($retries, $retryMs);
-            }
-
-            $resp = $http->post($endpoint, $payload);
-
-            if (! $resp->ok()) {
-                return ['active' => false];
-            }
-
-            $data = $resp->json();
-
-            return is_array($data) ? $data : ['active' => false];
-        } catch (\Throwable $e) {
-            return ['active' => false];
-        }
     }
 }

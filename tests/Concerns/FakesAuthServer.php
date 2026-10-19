@@ -21,6 +21,20 @@ trait FakesAuthServer
 
     protected string $tokenSubjectType = 'user';
 
+    /** @var array<int, string> */
+    protected array $tokenRoles = [];
+
+    /** @var array<int, string> */
+    protected array $tokenPermissions = [];
+
+    /**
+     * stores.id values where the caller holds `view tickets` through a STORE
+     * role: not in `permissions`, only visible to pizzasys' per-store check.
+     *
+     * @var array<int, int>
+     */
+    protected array $tokenQueueStoreIds = [];
+
     /**
      * Registered ONCE per test. Http::fake() MERGES stubs and the first match
      * wins, so re-faking mid-test would silently keep the original response —
@@ -48,7 +62,28 @@ trait FakesAuthServer
         Http::preventStrayRequests();
 
         Http::fake([
-            'auth.test/*' => function () {
+            'auth.test/*' => function ($request) {
+                $ext = ['authorized' => $this->tokenAuthorized];
+
+                // TicketQueueAccess asking "may the caller list these stores'
+                // tickets?" (the list route, with `stores` in the query).
+                // Answer the way pizzasys does for a scoped rule: one verdict
+                // per store, true only for those the test says hold the
+                // permission.
+                $asked = data_get($request->data(), 'store_context.query.stores');
+
+                if (is_array($asked) && data_get($request->data(), 'route_name') === 'api.v1.stores.tickets.index') {
+                    $perStore = [];
+                    foreach ($asked as $id) {
+                        $perStore[(int) $id] = in_array((int) $id, $this->tokenQueueStoreIds, true);
+                    }
+
+                    $ext = [
+                        'authorized' => ! in_array(false, $perStore, true),
+                        'store' => ['store_mode' => 'scoped', 'per_store' => $perStore],
+                    ];
+                }
+
                 return Http::response([
                     'active' => $this->tokenActive,
                     'subject_type' => $this->tokenSubjectType,
@@ -57,9 +92,9 @@ trait FakesAuthServer
                         'name' => $this->authUser->name,
                         'email' => $this->authUser->email,
                     ],
-                    'roles' => [],
-                    'permissions' => [],
-                    'ext' => ['authorized' => $this->tokenAuthorized],
+                    'roles' => $this->tokenRoles,
+                    'permissions' => $this->tokenPermissions,
+                    'ext' => $ext,
                 ]);
             },
         ]);

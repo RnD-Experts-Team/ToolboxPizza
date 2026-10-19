@@ -4,6 +4,7 @@ namespace App\Providers;
 
 use App\Services\Breaks\WorkDayResolver;
 use App\Services\Tickets\TicketAccessService;
+use App\Services\Tickets\TicketQueueAccess;
 use App\Services\Workbooks\WorkbookAccessService;
 use Illuminate\Support\ServiceProvider;
 
@@ -32,6 +33,7 @@ class AppServiceProvider extends ServiceProvider
         // reloads the whole folder tree and re-reads the viewer's grants three
         // times over for one page.
         $this->app->scoped(TicketAccessService::class);
+        $this->app->scoped(TicketQueueAccess::class);
         $this->app->scoped(WorkbookAccessService::class);
     }
 

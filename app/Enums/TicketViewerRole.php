@@ -27,6 +27,13 @@ enum TicketViewerRole: string
     /** Explicitly added, read-only. */
     case Reader = 'reader';
 
+    /**
+     * No relationship to the ticket, but holds `view tickets` globally (the
+     * super-admin does). Read-only, and the lowest rung: any real relationship
+     * to the ticket outranks it.
+     */
+    case Viewer = 'viewer';
+
     /** No relationship at all - answers 404, not 403. */
     case None = 'none';
 
@@ -38,6 +45,7 @@ enum TicketViewerRole: string
             self::Reporter => 'Reporter',
             self::Responder => 'Responder',
             self::Reader => 'Reader',
+            self::Viewer => 'Viewer',
             self::None => 'No access',
         };
     }
@@ -51,7 +59,7 @@ enum TicketViewerRole: string
     {
         return match ($this) {
             self::ExceptionAssignee, self::Assignee, self::Reporter, self::Responder => true,
-            self::Reader, self::None => false,
+            self::Reader, self::Viewer, self::None => false,
         };
     }
 
@@ -63,7 +71,7 @@ enum TicketViewerRole: string
     {
         return match ($this) {
             self::ExceptionAssignee, self::Assignee => true,
-            self::Reporter, self::Responder, self::Reader, self::None => false,
+            self::Reporter, self::Responder, self::Reader, self::Viewer, self::None => false,
         };
     }
 
