@@ -126,6 +126,47 @@ class TicketInboxFilterTest extends TestCase
     }
 
     /**
+     * No section, no store grant, nothing reported: the super-admin still gets
+     * the whole estate, because the visibility clause is dropped for a global
+     * `view tickets` holder.
+     */
+    public function test_a_global_view_tickets_holder_sees_every_ticket(): void
+    {
+        $this->tokenPermissions = ['view tickets'];
+
+        $a = $this->ticketAt($this->store);
+        $b = $this->ticketAt($this->otherStore);
+
+        $this->assertEqualsCanonicalizing([$a->id, $b->id], $this->inbox());
+    }
+
+    /**
+     * Held through a store role: the inbox adds exactly the stores pizzasys
+     * says the permission holds at - not every store the caller has a role at.
+     */
+    public function test_a_store_scoped_view_tickets_holder_sees_that_stores_queue_only(): void
+    {
+        $this->grantStore($this->viewer);
+        $this->grantStore($this->viewer, $this->otherStore->store_number);
+        $this->tokenQueueStoreIds = [$this->store->id];
+
+        $here = $this->ticketAt($this->store);
+        $there = $this->ticketAt($this->otherStore);
+
+        $ids = $this->inbox();
+
+        $this->assertContains($here->id, $ids);
+        $this->assertNotContains($there->id, $ids);
+    }
+
+    public function test_holding_a_role_at_a_store_is_not_enough_without_the_permission(): void
+    {
+        $this->grantStore($this->viewer);
+
+        $this->assertSame([], $this->inbox());
+    }
+
+    /**
      * You always see what you reported, wherever it was raised and whatever has
      * happened to your store access since.
      */

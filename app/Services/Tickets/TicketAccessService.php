@@ -48,7 +48,21 @@ class TicketAccessService
     /** @var array<int, array<int, int>>|null parent id => child ids */
     private ?array $children = null;
 
-    public function __construct(private readonly StoreAccessResolver $storeAccess) {}
+    public function __construct(
+        private readonly StoreAccessResolver $storeAccess,
+        private readonly TicketQueueAccess $queue,
+    ) {}
+
+    /**
+     * The stores whose whole queue the caller may see through `view tickets`;
+     * NULL is every store.
+     *
+     * @return array<int, int>|null
+     */
+    public function queueStoreIds(User $user): ?array
+    {
+        return $this->queue->viewableStoreIds($user);
+    }
 
     // -------------------------------------------------------------------------
     // Resolving a ticket for a caller
@@ -104,7 +118,11 @@ class TicketAccessService
         return match ($participant) {
             TicketParticipantRole::Responder => TicketViewerRole::Responder,
             TicketParticipantRole::Reader => TicketViewerRole::Reader,
-            default => TicketViewerRole::None,
+            // No relationship to the ticket. The list endpoint already hands a
+            // `view tickets` holder the whole store queue; without this,
+            // opening any row of it would 404 for anyone not also its
+            // reporter, assignee or participant.
+            default => $this->queue->canViewStore($user, $ticket->store) ? TicketViewerRole::Viewer : TicketViewerRole::None,
         };
     }
 

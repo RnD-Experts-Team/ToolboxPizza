@@ -68,6 +68,16 @@ class TicketQueryService
      */
     private function scopeToVisible(Builder $query, User $viewer): Builder
     {
+        // `view tickets` is the permission that lists a store's queue and lets
+        // show() open any of its tickets, so the inbox honours it too: NULL is
+        // held globally (the super-admin) and drops the filter, a list is the
+        // stores where a store role grants it.
+        $queueStoreIds = $this->access->queueStoreIds($viewer);
+
+        if ($queueStoreIds === null) {
+            return $query;
+        }
+
         $sections = $this->access->assignedSectionsFor($viewer->id);
         $storeIds = $this->storeAccess->accessibleStoreIdsFor($viewer->id);
 
@@ -76,9 +86,13 @@ class TicketQueryService
         $scopedSectionIds = array_keys(array_filter($sections));
         $unscopedSectionIds = array_keys(array_filter($sections, fn (bool $scoped) => ! $scoped));
 
-        return $query->where(function (Builder $q) use ($viewer, $scopedSectionIds, $unscopedSectionIds, $storeIds) {
+        return $query->where(function (Builder $q) use ($viewer, $scopedSectionIds, $unscopedSectionIds, $storeIds, $queueStoreIds) {
             $q->where('reported_by', $viewer->id)
                 ->orWhereHas('participants', fn (Builder $p) => $p->where('user_id', $viewer->id));
+
+            if ($queueStoreIds !== []) {
+                $q->orWhereIn('store_id', $queueStoreIds);
+            }
 
             if ($unscopedSectionIds !== []) {
                 $q->orWhereIn('ticket_section_id', $unscopedSectionIds);

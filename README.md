@@ -95,14 +95,26 @@ answers **404** to them.
 
 Highest power wins, so a reporter who also owns the queue keeps status powers.
 
-| Action | Reporter | Assignee | Responder | Reader | Unrelated |
-|---|---|---|---|---|---|
-| View | ✓ | ✓ | ✓ | ✓ | **404** |
-| Respond / attach / note | ✓ | ✓ | ✓ | 403 | 404 |
-| Change status, reopen | 403 | ✓ | 403 | 403 | 404 |
-| Add / remove participants | 403 | ✓ | 403 | 403 | 404 |
-| Edit title/description | ✓ **while `pending`** | ✓ any status | 403 | 403 | 404 |
-| Re-section | 403 | ✓ | 403 | 403 | 404 |
+| Action | Reporter | Assignee | Responder | Reader | Viewer | Unrelated |
+|---|---|---|---|---|---|---|
+| View | ✓ | ✓ | ✓ | ✓ | ✓ | **404** |
+| Respond / attach / note | ✓ | ✓ | ✓ | 403 | 403 | 404 |
+| Change status, reopen | 403 | ✓ | 403 | 403 | 403 | 404 |
+| Add / remove participants | 403 | ✓ | 403 | 403 | 403 | 404 |
+| Edit title/description | ✓ **while `pending`** | ✓ any status | 403 | 403 | 403 | 404 |
+| Re-section | 403 | ✓ | 403 | 403 | 403 | 404 |
+
+**Viewer** is not a relationship to the ticket: it is the caller holding the
+`view tickets` permission - the one that lists a store's whole queue - so the rows
+of that list open too. Held **globally** (the super-admin holds every permission;
+a head holding Store Manager globally does too) it is read from the permissions
+pizzasys returned for the request and covers every store. Held **per store**
+through a store role it is not in the token, so `TicketQueueAccess` asks pizzasys
+the same per-store question its `GET /stores/{id}/tickets` rule answers (one call
+for all the stores in question) and reads the per-store verdicts back; no role
+names are hard-coded here. A viewer opens any such ticket read-only, the
+cross-store inbox adds those stores' tickets, and any real relationship to a
+ticket outranks it. If pizzasys cannot be reached the answer is "no" (404).
 
 The reporter's edit window closes at `pending` because once somebody has picked
 the ticket up, silently rewriting the description invalidates what they acted
