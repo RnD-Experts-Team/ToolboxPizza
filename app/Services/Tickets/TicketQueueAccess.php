@@ -45,15 +45,31 @@ class TicketQueueAccess
     ) {}
 
     /**
-     * Held globally: every store's queue.
+     * Does the caller run the ticket system (`administer tickets`, global)?
+     * pizzasys gates the catalog on it; here it also means acting on any
+     * ticket.
+     */
+    public function administers(User $user): bool
+    {
+        return $this->callerHolds($user, 'administer tickets');
+    }
+
+    /**
+     * Held globally: every store's queue. An administrator sees every ticket
+     * too, whether or not `view tickets` was also granted to them.
      */
     public function holdsGlobally(User $user): bool
+    {
+        return $this->callerHolds($user, 'view tickets') || $this->administers($user);
+    }
+
+    private function callerHolds(User $user, string $permission): bool
     {
         if (! $this->isCaller($user)) {
             return false;
         }
 
-        return in_array('view tickets', (array) request()->attributes->get('authz_permissions', []), true);
+        return in_array($permission, (array) request()->attributes->get('authz_permissions', []), true);
     }
 
     /**

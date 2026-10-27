@@ -18,6 +18,13 @@ enum TicketViewerRole: string
     /** Reached by the section/level resolution, and has the store. */
     case Assignee = 'assignee';
 
+    /**
+     * Holds the global `administer tickets` permission (the super-admin does).
+     * The same powers as an assignee on EVERY ticket, with no routing needed:
+     * whoever runs the ticket system can act on any ticket in it.
+     */
+    case Administrator = 'administrator';
+
     /** Raised it. Can follow and reply, but not move it. */
     case Reporter = 'reporter';
 
@@ -42,6 +49,7 @@ enum TicketViewerRole: string
         return match ($this) {
             self::ExceptionAssignee => 'Assignee (added)',
             self::Assignee => 'Assignee',
+            self::Administrator => 'Administrator',
             self::Reporter => 'Reporter',
             self::Responder => 'Responder',
             self::Reader => 'Reader',
@@ -58,7 +66,7 @@ enum TicketViewerRole: string
     public function canRespond(): bool
     {
         return match ($this) {
-            self::ExceptionAssignee, self::Assignee, self::Reporter, self::Responder => true,
+            self::ExceptionAssignee, self::Assignee, self::Administrator, self::Reporter, self::Responder => true,
             self::Reader, self::Viewer, self::None => false,
         };
     }
@@ -70,7 +78,7 @@ enum TicketViewerRole: string
     public function canChangeStatus(): bool
     {
         return match ($this) {
-            self::ExceptionAssignee, self::Assignee => true,
+            self::ExceptionAssignee, self::Assignee, self::Administrator => true,
             self::Reporter, self::Responder, self::Reader, self::Viewer, self::None => false,
         };
     }

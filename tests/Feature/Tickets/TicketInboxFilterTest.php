@@ -140,6 +140,16 @@ class TicketInboxFilterTest extends TestCase
         $this->assertEqualsCanonicalizing([$a->id, $b->id], $this->inbox());
     }
 
+    public function test_an_administer_tickets_holder_sees_every_ticket(): void
+    {
+        $this->tokenPermissions = ['administer tickets'];
+
+        $a = $this->ticketAt($this->store);
+        $b = $this->ticketAt($this->otherStore);
+
+        $this->assertEqualsCanonicalizing([$a->id, $b->id], $this->inbox());
+    }
+
     /**
      * Held through a store role: the inbox adds exactly the stores pizzasys
      * says the permission holds at - not every store the caller has a role at.
