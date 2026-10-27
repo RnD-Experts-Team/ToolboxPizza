@@ -95,14 +95,21 @@ answers **404** to them.
 
 Highest power wins, so a reporter who also owns the queue keeps status powers.
 
-| Action | Reporter | Assignee | Responder | Reader | Viewer | Unrelated |
-|---|---|---|---|---|---|---|
-| View | ✓ | ✓ | ✓ | ✓ | ✓ | **404** |
-| Respond / attach / note | ✓ | ✓ | ✓ | 403 | 403 | 404 |
-| Change status, reopen | 403 | ✓ | 403 | 403 | 403 | 404 |
-| Add / remove participants | 403 | ✓ | 403 | 403 | 403 | 404 |
-| Edit title/description | ✓ **while `pending`** | ✓ any status | 403 | 403 | 403 | 404 |
-| Re-section | 403 | ✓ | 403 | 403 | 403 | 404 |
+| Action | Reporter | Assignee | **Administrator** | Responder | Reader | Viewer | Unrelated |
+|---|---|---|---|---|---|---|---|
+| View | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | **404** |
+| Respond / attach / note | ✓ | ✓ | ✓ | ✓ | 403 | 403 | 404 |
+| Change status, reopen | 403 | ✓ | ✓ | 403 | 403 | 403 | 404 |
+| Add / remove participants | 403 | ✓ | ✓ | 403 | 403 | 403 | 404 |
+| Edit title/description | ✓ **while `pending`** | ✓ any status | ✓ any status | 403 | 403 | 403 | 404 |
+| Re-section | 403 | ✓ | ✓ | 403 | 403 | 403 | 404 |
+
+**Administrator** is the global `administer tickets` permission (the super-admin
+holds it; HQ users get it by hand). It is the permission that runs the section /
+level / assignment catalog, and it also means the assignee's powers on EVERY
+ticket with no routing needed, and sight of every ticket in the inbox. It is
+read from the permissions pizzasys returned, like a global `view tickets`. A real
+assignee relationship keeps its own label; the powers are the same.
 
 **Viewer** is not a relationship to the ticket: it is the caller holding the
 `view tickets` permission - the one that lists a store's whole queue - so the rows

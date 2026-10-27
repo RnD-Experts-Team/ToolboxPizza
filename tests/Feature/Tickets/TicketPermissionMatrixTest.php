@@ -122,6 +122,41 @@ class TicketPermissionMatrixTest extends TestCase
     }
 
     /**
+     * `administer tickets` runs the ticket system: any ticket, no routing
+     * needed, every action - not just a look.
+     */
+    public function test_an_administer_tickets_holder_can_act_on_any_ticket(): void
+    {
+        $admin = $this->makeUser(67, 'Admin');
+        $this->tokenPermissions = ['administer tickets'];
+        $this->fakeAuthServer($admin);
+
+        $this->getJson($this->url(), $this->headers())
+            ->assertOk()
+            ->assertJsonPath('data.viewer.role', 'administrator')
+            ->assertJsonPath('data.viewer.can.respond', true)
+            ->assertJsonPath('data.viewer.can.change_status', true)
+            ->assertJsonPath('data.viewer.can.manage_participants', true)
+            ->assertJsonPath('data.viewer.can.edit', true);
+
+        $this->postJson($this->url('/responses'), ['body' => 'Looking at it'], $this->headers())->assertCreated();
+        $this->postJson($this->url('/status'), ['status' => 'in_progress'], $this->headers())->assertOk();
+    }
+
+    public function test_an_administrator_who_is_also_assigned_keeps_the_assignee_label(): void
+    {
+        $admin = $this->makeUser(68, 'Admin');
+        $this->assignSection($admin);
+        $this->grantStore($admin);
+        $this->tokenPermissions = ['administer tickets'];
+        $this->fakeAuthServer($admin);
+
+        $this->getJson($this->url(), $this->headers())
+            ->assertOk()
+            ->assertJsonPath('data.viewer.role', 'assignee');
+    }
+
+    /**
      * A worker's `view tickets` comes through a store role, so it is not in
      * the token's permissions: pizzasys' per-store check is what says so.
      */

@@ -111,6 +111,12 @@ class TicketAccessService
             return TicketViewerRole::Assignee;
         }
 
+        // Runs the ticket system: acts on any ticket, ahead of the narrower
+        // reporter / responder / reader roles that only subset those powers.
+        if ($this->queue->administers($user)) {
+            return TicketViewerRole::Administrator;
+        }
+
         if ((int) $ticket->reported_by === (int) $user->id) {
             return TicketViewerRole::Reporter;
         }
