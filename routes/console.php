@@ -17,6 +17,10 @@ Schedule::command('attachments:prune')->dailyAt('07:15')->withoutOverlapping()->
 // path, this sweeps up anything the queue lost or never published.
 Schedule::command('outbox:publish-pending')->everyFiveMinutes()->withoutOverlapping();
 
+// Calendar reminders: each one reaches its owner's bell within a minute of its
+// time. The command claims a reminder before sending it, so it is never sent twice.
+Schedule::command('calendar:dispatch-reminders')->everyMinute()->withoutOverlapping()->onOneServer();
+
 /*
  | NOT scheduled, deliberately: breaks:evaluate-milestones.
  |
