@@ -285,7 +285,7 @@ Route::prefix('v1')->middleware(['throttle:api', 'auth.token.store'])->group(fun
     Route::get('calendar/events/{id}', [CalendarEventController::class, 'show'])->whereNumber('id')->name('api.v1.calendar.events.show');
     Route::post('calendar/events/{id}/cancel', [CalendarEventController::class, 'cancel'])->whereNumber('id')->name('api.v1.calendar.events.cancel');
     Route::post('calendar/tasks/{id}/{action}', [CalendarEventController::class, 'taskAction'])
-        ->whereNumber('id')->whereIn('action', ['start', 'submit', 'approve', 'return'])->name('api.v1.calendar.tasks.action');
+        ->whereNumber('id')->whereIn('action', ['start', 'submit', 'approve', 'return', 'done', 'reopen'])->name('api.v1.calendar.tasks.action');
     Route::get('calendar/reminders', [CalendarReminderController::class, 'index'])->name('api.v1.calendar.reminders.index');
     Route::post('calendar/reminders/{id}/snooze', [CalendarReminderController::class, 'snooze'])->whereNumber('id')->name('api.v1.calendar.reminders.snooze');
     Route::post('calendar/reminders/{id}/done', [CalendarReminderController::class, 'done'])->whereNumber('id')->name('api.v1.calendar.reminders.done');

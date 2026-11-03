@@ -13,13 +13,18 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
  * A task also has a CalendarTask row and one CalendarTaskAssignment per store;
  * a reminder also has a CalendarReminder row. CalendarEventController creates
  * them together, so `type = task` always means the task row exists.
+ *
+ * `scope` — who it is for: `custom` the chosen stores, `public` every store
+ * there was when it was made, `private` only its creator (no stores).
  */
 class CalendarEvent extends Model
 {
     public const TYPES = ['event', 'task', 'reminder'];
 
+    public const SCOPES = ['custom', 'public', 'private'];
+
     protected $fillable = [
-        'type', 'title', 'description', 'category', 'priority',
+        'type', 'title', 'description', 'category', 'priority', 'scope',
         'date', 'start_time', 'end_time', 'link', 'created_by', 'cancelled_at',
     ];
 
@@ -55,5 +60,10 @@ class CalendarEvent extends Model
     public function isCancelled(): bool
     {
         return $this->cancelled_at !== null;
+    }
+
+    public function isPrivate(): bool
+    {
+        return $this->scope === 'private';
     }
 }
