@@ -261,7 +261,7 @@ class CalendarFeedController extends Controller
                 'type'       => 'reminder',
                 'layer'      => 'mine',
                 'store'      => null,
-                'title'      => '🔔 ' . mb_substr((string) $r->event?->title, 0, 115),
+                'title'      => 'Reminder: ' . mb_substr((string) $r->event?->title, 0, 110),
                 'all_day'    => false,
                 'date'       => $r->remind_at->copy()->utc()->toDateString(),
                 'date_end'   => null,
