@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\ReportDatasetController;
 use App\Http\Controllers\Api\V1\BreakController;
 use App\Http\Controllers\Api\V1\BreakSettingController;
 use App\Http\Controllers\Api\V1\CalendarEventController;
@@ -9,6 +10,7 @@ use App\Http\Controllers\Api\V1\TicketCatalogController;
 use App\Http\Controllers\Api\V1\TicketController;
 use App\Http\Controllers\Api\V1\WorkbookController;
 use App\Http\Controllers\Api\V1\WorkbookRowController;
+use App\Reports\ReportDatasets;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -291,3 +293,25 @@ Route::prefix('v1')->middleware(['throttle:api', 'auth.token.store'])->group(fun
     Route::post('calendar/reminders/{id}/done', [CalendarReminderController::class, 'done'])->whereNumber('id')->name('api.v1.calendar.reminders.done');
     Route::post('calendar/reminders/{id}/cancel', [CalendarReminderController::class, 'cancel'])->whereNumber('id')->name('api.v1.calendar.reminders.cancel');
 });
+
+/*
+|--------------------------------------------------------------------------
+| The report dataset contract (the same in every service).
+|
+| Outside `v1` on purpose: the report builder reaches every service at
+| /report-datasets. One literal query route per dataset - never a {key}
+| parameter - so each dataset has its own pizzasys auth rule. The body's
+| `stores` are store codes.
+|
+| Tiers: the catalog is a plain read. A dataset query is a grouped scan, so it
+| stacks `api-heavy` on `api` like the other whole-table routes above.
+|--------------------------------------------------------------------------
+*/
+Route::get('report-datasets', [ReportDatasetController::class, 'catalog'])
+    ->middleware(['throttle:api', 'auth.token.store'])->name('api.report-datasets.index');
+foreach (ReportDatasets::DATASETS as $dataset) {
+    Route::post('report-datasets/'.$dataset::KEY.'/query', [ReportDatasetController::class, 'query'])
+        ->defaults('dataset', $dataset::KEY)
+        ->middleware(['throttle:api', 'throttle:api-heavy', 'auth.token.store'])
+        ->name('api.report-datasets.'.$dataset::KEY.'.query');
+}
