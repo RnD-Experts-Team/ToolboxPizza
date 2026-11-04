@@ -14,6 +14,9 @@ use Illuminate\Support\Str;
  * minute of `remind_at`. Each one is CLAIMED first — an UPDATE that only
  * succeeds while it is still `scheduled` — and only the run that claimed it
  * writes the notification, so two overlapping runs can never send it twice.
+ *
+ * Does nothing in production (APP_ENV=production): the calendar is not launched
+ * there yet. Reminders are left untouched, not claimed — nothing is lost.
  */
 class DispatchCalendarReminders extends Command
 {
@@ -23,6 +26,12 @@ class DispatchCalendarReminders extends Command
 
     public function handle(ToolboxOutboxService $outbox): int
     {
+        if (app()->isProduction()) {
+            $this->info('Calendar reminders are off in production.');
+
+            return self::SUCCESS;
+        }
+
         $sent = 0;
 
         CalendarReminder::query()
