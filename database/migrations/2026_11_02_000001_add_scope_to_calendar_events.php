@@ -12,7 +12,7 @@ use Illuminate\Support\Facades\Schema;
  *   private  only the user who made it: no stores at all. A private task is
  *            simply done or not, so its state is `calendar_tasks.done_at`.
  *
- * Only `administer calendar` (the super-admin) can make public or private ones.
+ * Who may make public or private ones is pizzasys's decision, not this service's.
  */
 return new class extends Migration
 {
