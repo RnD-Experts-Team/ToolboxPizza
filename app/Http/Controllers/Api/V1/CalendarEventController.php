@@ -134,11 +134,25 @@ class CalendarEventController extends Controller
         return response()->json(['data' => $this->present($this->find($request, $id))]);
     }
 
+    /**
+     * POST /v1/calendar/events/{id}/cancel[?stores=03795-00001,…]
+     *
+     * With `stores`: cancelled in those stores only, it stays in the others —
+     * a task's assignment there becomes `cancelled` (an approved one stays done),
+     * a plain event simply leaves those stores. Once nothing is left anywhere,
+     * the whole event is cancelled. Without `stores` (and always for a private
+     * event or a reminder): cancelled everywhere, as before.
+     */
     public function cancel(Request $request, int $id): JsonResponse
     {
         $event = $this->find($request, $id);
         abort_unless((int) $event->created_by === (int) $request->user()->id, 403, 'Only the creator can cancel this.');
         abort_if($event->isCancelled(), 422, 'Already cancelled.');
+
+        $numbers = trim((string) $request->query('stores', ''));
+        if ($numbers !== '' && $event->stores()->exists()) {
+            return $this->cancelInStores($event, $this->resolveStores($numbers));
+        }
 
         DB::transaction(function () use ($event) {
             $event->update(['cancelled_at' => now()]);
@@ -150,6 +164,44 @@ class CalendarEventController extends Controller
                 ->update(['status' => 'cancelled']);
 
             $event->reminder()->whereIn('status', ['scheduled', 'sent'])->update(['status' => 'cancelled']);
+        });
+
+        return response()->json(['data' => $this->present($event->fresh())]);
+    }
+
+    /** cancel() for some stores only. */
+    private function cancelInStores(CalendarEvent $event, array $storeIds): JsonResponse
+    {
+        $rows = $event->stores()->with('assignment')->whereIn('store_id', $storeIds)->get();
+        if ($rows->count() !== count($storeIds)) {
+            throw ValidationException::withMessages(['stores' => "This {$event->type} is not in every store sent."]);
+        }
+
+        DB::transaction(function () use ($event, $rows) {
+            if ($event->type === 'task') {
+                // Each of those stores not already finished; an approved one stays done.
+                $changed = CalendarTaskAssignment::query()
+                    ->whereIn('calendar_event_store_id', $rows->modelKeys())
+                    ->whereIn('status', [...CalendarTaskAssignment::OPEN, 'submitted'])
+                    ->update(['status' => 'cancelled']);
+                if ($changed === 0) {
+                    throw ValidationException::withMessages(['stores' => 'Nothing to cancel there: already done or cancelled.']);
+                }
+
+                // Every store cancelled: the task is cancelled.
+                $left = CalendarTaskAssignment::query()
+                    ->whereIn('calendar_event_store_id', $event->stores()->pluck('id'))
+                    ->where('status', '!=', 'cancelled')
+                    ->exists();
+            } else {
+                // A plain event just leaves those stores.
+                CalendarEventStore::query()->whereIn('id', $rows->modelKeys())->delete();
+                $left = $event->stores()->exists();
+            }
+
+            if (! $left) {
+                $event->update(['cancelled_at' => now()]);
+            }
         });
 
         return response()->json(['data' => $this->present($event->fresh())]);
