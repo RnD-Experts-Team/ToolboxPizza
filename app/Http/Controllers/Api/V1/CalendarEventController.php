@@ -24,24 +24,21 @@ use Illuminate\Validation\ValidationException;
  *   POST /v1/calendar/tasks/{id}/{action}?stores=X   start | submit | approve | return, in store X
  *   POST /v1/calendar/tasks/{id}/{done|reopen}       a private task (no stores)
  *
- * `scope` says who it is for: `custom` the stores sent (anyone, as before),
- * `public` every store, `private` only its creator — no stores at all.
+ * `scope` says who it is for: `custom` the stores sent, `public` every store,
+ * `private` only its creator — no stores at all.
  *
- * Who may call what is pizzasys's decision, as everywhere in this service. The
- * stores travel as `stores` (body on create, query on task actions) so the rule
- * can check every one of them. What only this service can know is checked here:
- * a reminder or a private event or task is its creator's alone, only the creator
- * reviews a task, and only `administer calendar` (the super-admin) may make a
- * public or private one.
+ * Who may call what — including who may make a public or private one — is
+ * pizzasys's decision, as everywhere in this service. The stores travel as
+ * `stores` (body on create, query on task actions) so the rule can check every
+ * one of them. What only this service can know is checked here: a reminder or a
+ * private event or task is its creator's alone, and only the creator reviews a
+ * task.
  *
  * Dates and times are UTC.
  */
 class CalendarEventController extends Controller
 {
     private const MAX_STORES = 50;
-
-    /** Global permission for public and private events and tasks; the super-admin holds it. */
-    private const ADMIN_PERMISSION = 'administer calendar';
 
     public function store(Request $request): JsonResponse
     {
@@ -82,8 +79,6 @@ class CalendarEventController extends Controller
 
         $scope = $data['scope'] ?? 'custom';
         $private = $scope === 'private';
-        abort_if($scope !== 'custom' && ! $this->isCalendarAdmin($request), 403,
-            "Only a calendar administrator can create a {$scope} {$data['type']}.");
 
         $storeIds = match ($scope) {
             'public'  => $this->allStores(),
@@ -279,12 +274,6 @@ class CalendarEventController extends Controller
         );
 
         return $event;
-    }
-
-    /** Holds `administer calendar` (from pizzasys, like `administer tickets`). */
-    private function isCalendarAdmin(Request $request): bool
-    {
-        return in_array(self::ADMIN_PERMISSION, (array) $request->attributes->get('authz_permissions', []), true);
     }
 
     /**
