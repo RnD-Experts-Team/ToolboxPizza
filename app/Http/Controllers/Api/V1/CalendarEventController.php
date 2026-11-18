@@ -4,28 +4,40 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
 use App\Models\CalendarEvent;
+use App\Models\CalendarEventPerson;
 use App\Models\CalendarEventStore;
 use App\Models\CalendarTask;
 use App\Models\CalendarTaskAssignment;
 use App\Models\Store;
+use App\Models\User;
+use App\Models\UserStoreRole;
+use App\Services\ToolboxEvents\ToolboxOutboxService;
 use Carbon\Carbon;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
 /**
  * The calendar's own events, tasks and reminders.
  *
+ *   GET  /v1/calendar/people?q=                      who can be chosen for scope = people (store managers)
  *   POST /v1/calendar/events                         create (type = event | task | reminder)
  *   GET  /v1/calendar/events/{id}                    details
- *   POST /v1/calendar/events/{id}/cancel             creator only
+ *   POST /v1/calendar/events/{id}/cancel             creator only (?stores= or ?users= for some only)
  *   POST /v1/calendar/tasks/{id}/{action}?stores=X   start | submit | approve | return, in store X
+ *   POST /v1/calendar/tasks/{id}/{start|submit}      a people task: the caller's own part
+ *   POST /v1/calendar/tasks/{id}/{approve|return}?user=N   a people task: that person's part
  *   POST /v1/calendar/tasks/{id}/{done|reopen}       a private task (no stores)
  *
  * `scope` says who it is for: `custom` the stores sent, `public` every store,
- * `private` only its creator — no stores at all.
+ * `private` only its creator — no stores at all, `people` the store managers
+ * sent in `people` (user ids) — no stores either; each of them gets a bell
+ * notification (not in production: the calendar is not launched there yet).
  *
  * Who may call what — including who may make a public or private one — is
  * pizzasys's decision, as everywhere in this service. The stores travel as
@@ -40,6 +52,39 @@ class CalendarEventController extends Controller
 {
     private const MAX_STORES = 50;
 
+    private const MAX_PEOPLE = 50;
+
+    /** The role whose holders can be chosen for scope = people (compared lower-case, `_` = space). */
+    private const PEOPLE_ROLE = 'store manager';
+
+    /**
+     * GET /v1/calendar/people?q=ahm — the store managers, to choose from for
+     * scope = people. Each with the stores they manage ("all" = every store).
+     */
+    public function people(Request $request): JsonResponse
+    {
+        $q = trim((string) $request->query('q', ''));
+
+        $users = User::query()
+            ->select('id', 'name')
+            ->whereIn('id', $this->managerRoles()->select('user_id'))
+            ->when($q !== '', fn ($w) => $w->where('name', 'like', '%' . addcslashes($q, '%_\\') . '%'))
+            ->orderBy('name')
+            ->limit(100)
+            ->get();
+
+        $stores = $this->managerRoles()
+            ->whereIn('user_id', $users->modelKeys())
+            ->get(['user_id', 'store_id'])
+            ->groupBy('user_id');
+
+        return response()->json(['data' => $users->map(fn (User $u) => [
+            'id'     => (int) $u->id,
+            'name'   => $u->name,
+            'stores' => $stores->get($u->id, collect())->map(fn ($r) => $r->store_id ?? 'all')->unique()->sort()->values()->all(),
+        ])->values()->all()]);
+    }
+
     public function store(Request $request): JsonResponse
     {
         $data = $request->validate([
@@ -52,7 +97,10 @@ class CalendarEventController extends Controller
 
             // events and tasks: stores (a list or "a,b") only for a custom scope
             'scope'       => ['exclude_if:type,reminder', 'nullable', Rule::in(CalendarEvent::SCOPES)],
-            'stores'      => ['exclude_if:type,reminder', 'required_if:scope,custom', 'required_without:scope', 'prohibited_if:scope,public', 'prohibited_if:scope,private'],
+            'stores'      => ['exclude_if:type,reminder', 'required_if:scope,custom', 'required_without:scope', 'prohibited_if:scope,public', 'prohibited_if:scope,private', 'prohibited_if:scope,people'],
+            // scope = people only: user ids of store managers
+            'people'      => ['exclude_if:type,reminder', 'required_if:scope,people', 'prohibited_unless:scope,people', 'array', 'min:1', 'max:' . self::MAX_PEOPLE],
+            'people.*'    => ['integer', 'distinct'],
             'date'        => ['exclude_if:type,reminder', 'required', 'date_format:Y-m-d'],
             'start_time'  => ['exclude_if:type,reminder', 'nullable', 'date_format:H:i'],
             'end_time'    => ['exclude_if:type,reminder', 'nullable', 'date_format:H:i', 'after:start_time'],
@@ -81,10 +129,11 @@ class CalendarEventController extends Controller
         $private = $scope === 'private';
 
         $storeIds = match ($scope) {
-            'public'  => $this->allStores(),
-            'private' => [],
-            default   => $this->resolveStores($data['stores']),
+            'public'            => $this->allStores(),
+            'private', 'people' => [],
+            default             => $this->resolveStores($data['stores']),
         };
+        $people = $scope === 'people' ? $this->resolvePeople($data['people']) : [];
 
         if ($data['type'] === 'task') {
             $deadline = $this->deadline($data['date'], $data['start_time'] ?? null);
@@ -93,7 +142,7 @@ class CalendarEventController extends Controller
             }
         }
 
-        $event = DB::transaction(function () use ($data, $userId, $storeIds, $scope, $private) {
+        $event = DB::transaction(function () use ($data, $userId, $storeIds, $scope, $private, $people) {
             $event = CalendarEvent::query()->create([
                 'type'        => $data['type'],
                 'title'       => $data['title'],
@@ -121,6 +170,13 @@ class CalendarEventController extends Controller
                 if ($event->type === 'task') {
                     $row->assignment()->create(['status' => 'open']);
                 }
+            }
+
+            foreach ($people as $personId) {
+                $event->people()->create(['user_id' => $personId, 'status' => $event->type === 'task' ? 'open' : null]);
+            }
+            if ($people !== []) {
+                $this->tellPeople($event, $people, $userId);
             }
 
             return $event;
@@ -153,13 +209,20 @@ class CalendarEventController extends Controller
         if ($numbers !== '' && $event->stores()->exists()) {
             return $this->cancelInStores($event, $this->resolveStores($numbers));
         }
+        $users = trim((string) $request->query('users', ''));
+        if ($users !== '' && $event->isForPeople()) {
+            return $this->cancelForPeople($event, $users);
+        }
 
         DB::transaction(function () use ($event) {
             $event->update(['cancelled_at' => now()]);
 
-            // Tasks: every store not already finished. Reminders: never fire.
+            // Tasks: every store and person not already finished. Reminders: never fire.
             CalendarTaskAssignment::query()
                 ->whereIn('calendar_event_store_id', $event->stores()->pluck('id'))
+                ->whereIn('status', [...CalendarTaskAssignment::OPEN, 'submitted'])
+                ->update(['status' => 'cancelled']);
+            $event->people()
                 ->whereIn('status', [...CalendarTaskAssignment::OPEN, 'submitted'])
                 ->update(['status' => 'cancelled']);
 
@@ -207,13 +270,49 @@ class CalendarEventController extends Controller
         return response()->json(['data' => $this->present($event->fresh())]);
     }
 
+    /** cancel() for some of a people event's people only (?users=12,13) — as cancelInStores. */
+    private function cancelForPeople(CalendarEvent $event, string $users): JsonResponse
+    {
+        $ids = array_values(array_unique(array_filter(array_map('intval', explode(',', $users)))));
+        $rows = $event->people()->whereIn('user_id', $ids)->get();
+        if ($ids === [] || $rows->count() !== count($ids)) {
+            throw ValidationException::withMessages(['users' => "This {$event->type} is not for every person sent."]);
+        }
+
+        DB::transaction(function () use ($event, $rows) {
+            if ($event->type === 'task') {
+                // Each of them not already finished; an approved one stays done.
+                $changed = CalendarEventPerson::query()
+                    ->whereIn('id', $rows->modelKeys())
+                    ->whereIn('status', [...CalendarTaskAssignment::OPEN, 'submitted'])
+                    ->update(['status' => 'cancelled']);
+                if ($changed === 0) {
+                    throw ValidationException::withMessages(['users' => 'Nothing to cancel there: already done or cancelled.']);
+                }
+                $left = $event->people()->where('status', '!=', 'cancelled')->exists();
+            } else {
+                // A plain event just stops being theirs.
+                CalendarEventPerson::query()->whereIn('id', $rows->modelKeys())->delete();
+                $left = $event->people()->exists();
+            }
+
+            if (! $left) {
+                $event->update(['cancelled_at' => now()]);
+            }
+        });
+
+        return response()->json(['data' => $this->present($event->fresh())]);
+    }
+
     /** POST /v1/calendar/tasks/{id}/{action}?stores=03795-00001 — or {done|reopen} for a private task */
     public function taskAction(Request $request, int $id, string $action): JsonResponse
     {
         abort_unless(in_array($action, ['start', 'submit', 'approve', 'return', 'done', 'reopen'], true), 404);
 
         $event = CalendarEvent::query()->with('task')->where('type', 'task')->findOrFail($id);
-        abort_if($event->isPrivate() && (int) $event->created_by !== (int) $request->user()->id, 404);
+        $userId = (int) $request->user()->id;
+        abort_if($event->isPrivate() && (int) $event->created_by !== $userId, 404);
+        abort_if($event->isForPeople() && ! $event->involves($userId), 404);
         abort_if($event->isCancelled(), 422, 'This task was cancelled.');
 
         // A private task has no stores: it is done, or it is not.
@@ -232,15 +331,26 @@ class CalendarEventController extends Controller
             return response()->json(['data' => $this->present($event->fresh())]);
         }
 
-        $storeIds = $this->resolveStores($request->query('stores', ''));
-        abort_unless(count($storeIds) === 1, 422, 'Send exactly one store in `stores`.');
-
-        $assignment = CalendarTaskAssignment::query()
-            ->whereHas('eventStore', fn ($q) => $q->where('calendar_event_id', $event->id)->where('store_id', $storeIds[0]))
-            ->firstOrFail();
-
-        $userId = (int) $request->user()->id;
         $isCreator = (int) $event->created_by === $userId;
+
+        if ($event->isForPeople()) {
+            // start / submit: the caller's own part. approve / return: the creator, for ?user=N.
+            if (in_array($action, ['start', 'submit'], true)) {
+                $assignment = $event->people()->where('user_id', $userId)->first();
+                abort_unless($assignment, 403, 'This task is not assigned to you.');
+            } else {
+                abort_unless($isCreator, 403, 'Only the creator reviews this task.');
+                $assignment = $event->people()->where('user_id', (int) $request->query('user', 0))->first()
+                    ?? throw ValidationException::withMessages(['user' => 'Send one of the people on this task in `user`.']);
+            }
+        } else {
+            $storeIds = $this->resolveStores($request->query('stores', ''));
+            abort_unless(count($storeIds) === 1, 422, 'Send exactly one store in `stores`.');
+
+            $assignment = CalendarTaskAssignment::query()
+                ->whereHas('eventStore', fn ($q) => $q->where('calendar_event_id', $event->id)->where('store_id', $storeIds[0]))
+                ->firstOrFail();
+        }
 
         switch ($action) {
             case 'start':
@@ -253,11 +363,10 @@ class CalendarEventController extends Controller
                     // No review wanted: done the moment it is submitted.
                     'status'          => $event->task->requires_review ? 'submitted' : 'approved',
                     'submitted_at'    => now(),
-                    'submitted_by'    => $userId,
                     'submitted_late'  => $this->deadline($event->date->toDateString(), $event->start_time)->isPast(),
                     'completion_note' => $data['note'] ?? null,
                     'return_reason'   => null,
-                ]);
+                ] + ($event->isForPeople() ? [] : ['submitted_by' => $userId])); // a person's row is that person's own
                 break;
 
             case 'approve':
@@ -313,7 +422,11 @@ class CalendarEventController extends Controller
         return $this->present($event->fresh());
     }
 
-    /** A reminder, or a private event or task, is its owner's alone: anyone else gets 404, as if it did not exist. */
+    /**
+     * A reminder, or a private event or task, is its owner's alone; a people
+     * one is its creator's and its people's. Anyone else gets 404, as if it did
+     * not exist.
+     */
     private function find(Request $request, int $id): CalendarEvent
     {
         $event = CalendarEvent::query()->with('reminder')->findOrFail($id);
@@ -321,7 +434,8 @@ class CalendarEventController extends Controller
 
         abort_if(
             ($event->type === 'reminder' && (int) $event->reminder?->user_id !== $me)
-                || ($event->isPrivate() && (int) $event->created_by !== $me),
+                || ($event->isPrivate() && (int) $event->created_by !== $me)
+                || ($event->isForPeople() && ! $event->involves($me)),
             404
         );
 
@@ -371,8 +485,59 @@ class CalendarEventController extends Controller
             : Carbon::parse($date, 'UTC')->endOfDay();
     }
 
+    /** Store managers' role grants (role_name compared lower-case, `_` read as a space). */
+    private function managerRoles(): Builder
+    {
+        return UserStoreRole::query()
+            ->where('active', true)
+            ->whereRaw("LOWER(REPLACE(role_name, '_', ' ')) = ?", [self::PEOPLE_ROLE]);
+    }
+
+    /**
+     * The user ids sent in `people`, each one a store manager we know. Anyone
+     * else is refused: they would never see it.
+     *
+     * @return array<int, int>
+     */
+    private function resolvePeople(array $ids): array
+    {
+        $ids = array_values(array_unique(array_map('intval', $ids)));
+        $known = User::query()->whereIn('id', $ids)->whereIn('id', $this->managerRoles()->select('user_id'))->pluck('id')->map(fn ($id) => (int) $id)->all();
+        $unknown = array_values(array_diff($ids, $known));
+        if ($unknown !== []) {
+            throw ValidationException::withMessages(['people' => 'Not a store manager: ' . implode(', ', $unknown) . '.']);
+        }
+
+        return $ids;
+    }
+
+    /**
+     * The bell for each person given an event or task (not the creator, who
+     * knows). Written to the outbox in the same transaction, so a create that
+     * rolls back tells nobody. Off in production, like the reminders: the
+     * calendar is not launched there yet.
+     */
+    private function tellPeople(CalendarEvent $event, array $people, int $creatorId): void
+    {
+        $to = array_values(array_diff($people, [$creatorId]));
+        if ($to === [] || app()->isProduction()) {
+            return;
+        }
+
+        $isTask = $event->type === 'task';
+        $when = $event->date->toDateString() . ($event->start_time ? ' ' . substr($event->start_time, 0, 5) . ' UTC' : '');
+        $from = User::query()->whereKey($creatorId)->value('name') ?? 'Someone';
+
+        app(ToolboxOutboxService::class)->notify($to, [
+            'type'       => 'calendar_assigned',
+            'title'      => ($isTask ? 'New task: ' : 'New event: ') . Str::limit($event->title, 80),
+            'body'       => Str::limit($from, 60) . ($isTask ? ' gave you a task, due ' : ' added you to an event on ') . $when . '.',
+            'action_url' => '/toolbox/calendar/' . $event->id,
+        ]);
+    }
+
     /** Move an assignment only from the states it may leave, or refuse. */
-    private function transition(CalendarTaskAssignment $assignment, array $from, array $changes): void
+    private function transition(Model $assignment, array $from, array $changes): void
     {
         if (! in_array($assignment->status, $from, true)) {
             throw ValidationException::withMessages([
@@ -386,7 +551,10 @@ class CalendarEventController extends Controller
     /** @return array<string, mixed> */
     private function present(CalendarEvent $event): array
     {
-        $event->loadMissing(['task', 'reminder', 'stores.store:id,store_number', 'stores.assignment']);
+        $event->loadMissing(['task', 'reminder', 'stores.store:id,store_number', 'stores.assignment', 'people.user:id,name']);
+        // The creator sees everyone's part; each person only their own.
+        $me = (int) auth()->id();
+        $seeAll = (int) $event->created_by === $me;
 
         return [
             'id'           => $event->id,
@@ -424,6 +592,20 @@ class CalendarEventController extends Controller
                     'return_reason'   => $s->assignment->return_reason,
                 ] : null,
             ])->values()->all(),
+            // scope = people; [] otherwise
+            'people'       => $event->people
+                ->filter(fn (CalendarEventPerson $p) => $seeAll || (int) $p->user_id === $me)
+                ->map(fn (CalendarEventPerson $p) => [
+                    'user_id'    => (int) $p->user_id,
+                    'name'       => $p->user?->name,
+                    'assignment' => $p->status === null ? null : [
+                        'status'          => $p->status,
+                        'submitted_at'    => $p->submitted_at?->toIso8601String(),
+                        'submitted_late'  => $p->submitted_late,
+                        'completion_note' => $p->completion_note,
+                        'return_reason'   => $p->return_reason,
+                    ],
+                ])->values()->all(),
         ];
     }
 }

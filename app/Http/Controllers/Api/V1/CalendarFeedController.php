@@ -27,6 +27,11 @@ use Illuminate\Validation\ValidationException;
  * The caller's own PRIVATE events and tasks come too, like reminders: no store
  * (store = null, layer = mine). A private task is done, or pending / overdue.
  *
+ * And the PEOPLE ones (scope = people) the caller made or is one of the people
+ * of, also with no store. A task: one item per person, with that person's
+ * status — the creator gets one for each of them, a person only their own.
+ * A plain event: one item.
+ *
  * Task status in the calendar:
  *   open / in_progress / returned  → pending / in_progress, or overdue past the deadline
  *   submitted → done (extra.awaiting_review)   approved → done   cancelled → cancelled
@@ -79,6 +84,7 @@ class CalendarFeedController extends Controller
             $this->storeEvents($stores, $data['from'], $data['to']),
             // no store: nothing for a store's day to count
             $grouped ? [] : $this->myPrivate($me, $data['from'], $data['to']),
+            $grouped ? [] : $this->myPeople($me, $data['from'], $data['to']),
             $grouped ? [] : $this->myReminders($me, $data['from'], $data['to']),
         );
 
@@ -240,6 +246,81 @@ class CalendarFeedController extends Controller
             ->all();
     }
 
+    /**
+     * Events and tasks for chosen people that the caller made or is one of.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function myPeople(int $me, string $from, string $to): array
+    {
+        $events = CalendarEvent::query()
+            ->with(['task', 'creator:id,name', 'people.user:id,name'])
+            ->whereIn('type', ['event', 'task'])
+            ->where('scope', 'people')
+            ->whereBetween('date', [$from, $to])
+            ->where(fn ($w) => $w->whereNull('cancelled_at')->orWhere('type', 'task'))
+            ->where(fn ($w) => $w->where('created_by', $me)->orWhereHas('people', fn ($p) => $p->where('user_id', $me)))
+            ->get();
+
+        $items = [];
+        foreach ($events as $event) {
+            $date = $event->date->toDateString();
+            $start = $event->start_time ? $date . 'T' . substr($event->start_time, 0, 5) . ':00Z' : null;
+            $isCreator = (int) $event->created_by === $me;
+            $person = fn ($u, string $role) => ['kind' => 'user', 'id' => (int) $u->id, 'name' => mb_substr((string) $u->name, 0, 60), 'role' => $role];
+            $base = [
+                'layer'    => 'mine',
+                'store'    => null,
+                'title'    => mb_substr($event->title, 0, 120),
+                'all_day'  => $start === null,
+                'date'     => $date,
+                'date_end' => null,
+                'start'    => $start,
+                'end'      => $start && $event->end_time ? $date . 'T' . substr($event->end_time, 0, 5) . ':00Z' : null,
+            ];
+            $extra = ['category' => $event->category, 'priority' => $event->priority, 'scope' => 'people'];
+
+            if ($event->type === 'event') {
+                $items[] = $base + [
+                    'id'         => 'toolbox:calendar_event:' . $event->id,
+                    'type'       => 'calendar_event',
+                    'status'     => 'info',
+                    'people'     => $event->creator ? [$person($event->creator, 'creator')] : [],
+                    'link'       => '/toolbox/calendar/' . $event->id,
+                    'updated_at' => $this->utc($event->updated_at),
+                    'extra'      => array_filter($extra, fn ($v) => $v !== null),
+                ];
+
+                continue;
+            }
+
+            foreach ($event->people as $row) {
+                if (! $isCreator && (int) $row->user_id !== $me) {
+                    continue; // a person sees only their own part
+                }
+                $items[] = $base + [
+                    'id'         => "toolbox:task:{$event->id}:user:{$row->user_id}",
+                    'type'       => 'task',
+                    'status'     => $this->statusOf($row->status, $this->deadline($event)),
+                    'people'     => array_values(array_filter([
+                        $row->user ? $person($row->user, 'assignee') : null,
+                        $event->creator ? $person($event->creator, 'creator') : null,
+                    ])),
+                    'link'       => '/toolbox/calendar/' . $event->id . '?' . http_build_query(['user' => (int) $row->user_id]),
+                    'updated_at' => $this->utc(max($event->updated_at, $row->updated_at)),
+                    'extra'      => array_filter($extra + [
+                        'task_status'     => $row->status,
+                        'awaiting_review' => $row->status === 'submitted',
+                        'submitted_late'  => (bool) $row->submitted_late,
+                        'proof'           => $event->task?->proof,
+                    ], fn ($v) => $v !== null),
+                ];
+            }
+        }
+
+        return $items;
+    }
+
     private function deadline(CalendarEvent $event): Carbon
     {
         $date = $event->date->toDateString();
@@ -286,9 +367,16 @@ class CalendarFeedController extends Controller
 
     private function taskStatus(CalendarEventStore $row, string $date): string
     {
-        $status = $row->assignment?->status ?? 'open';
         $time = $row->event->start_time;
         $deadline = $time ? Carbon::parse("{$date} {$time}", 'UTC') : Carbon::parse($date, 'UTC')->endOfDay();
+
+        return $this->statusOf($row->assignment?->status, $deadline);
+    }
+
+    /** A store's or a person's task state → the calendar's status. */
+    private function statusOf(?string $status, Carbon $deadline): string
+    {
+        $status ??= 'open';
 
         return match (true) {
             $status === 'cancelled'                        => 'cancelled',
