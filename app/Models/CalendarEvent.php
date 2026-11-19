@@ -15,13 +15,14 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
  * them together, so `type = task` always means the task row exists.
  *
  * `scope` — who it is for: `custom` the chosen stores, `public` every store
- * there was when it was made, `private` only its creator (no stores).
+ * there was when it was made, `private` only its creator (no stores), `people`
+ * the chosen people (CalendarEventPerson, no stores).
  */
 class CalendarEvent extends Model
 {
     public const TYPES = ['event', 'task', 'reminder'];
 
-    public const SCOPES = ['custom', 'public', 'private'];
+    public const SCOPES = ['custom', 'public', 'private', 'people'];
 
     protected $fillable = [
         'type', 'title', 'description', 'category', 'priority', 'scope',
@@ -50,6 +51,24 @@ class CalendarEvent extends Model
     public function stores(): HasMany
     {
         return $this->hasMany(CalendarEventStore::class);
+    }
+
+    /** The people it is for (scope = people). */
+    public function people(): HasMany
+    {
+        return $this->hasMany(CalendarEventPerson::class);
+    }
+
+    public function isForPeople(): bool
+    {
+        return $this->scope === 'people';
+    }
+
+    /** The creator, or one of its people. */
+    public function involves(int $userId): bool
+    {
+        return (int) $this->created_by === $userId
+            || ($this->isForPeople() && $this->people()->where('user_id', $userId)->exists());
     }
 
     public function creator(): BelongsTo
