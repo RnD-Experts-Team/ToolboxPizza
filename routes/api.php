@@ -283,6 +283,8 @@ Route::prefix('v1')->middleware(['throttle:api', 'auth.token.store'])->group(fun
     Route::get('calendar/feed', CalendarFeedController::class)->name('api.v1.calendar.feed');
     Route::get('calendar/people', [CalendarEventController::class, 'people'])->name('api.v1.calendar.people');
 Route::post('calendar/events', [CalendarEventController::class, 'store'])->name('api.v1.calendar.events.store');
+// Tasks have their own route so pizzasys can require `create calendar tasks` for them alone.
+Route::post('calendar/tasks', [CalendarEventController::class, 'storeTask'])->name('api.v1.calendar.tasks.store');
     Route::get('calendar/events/{id}', [CalendarEventController::class, 'show'])->whereNumber('id')->name('api.v1.calendar.events.show');
     Route::post('calendar/events/{id}/cancel', [CalendarEventController::class, 'cancel'])->whereNumber('id')->name('api.v1.calendar.events.cancel');
     Route::post('calendar/tasks/{id}/{action}', [CalendarEventController::class, 'taskAction'])

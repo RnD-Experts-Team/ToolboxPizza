@@ -26,7 +26,8 @@ use Illuminate\Validation\ValidationException;
  * The calendar's own events, tasks and reminders.
  *
  *   GET  /v1/calendar/people?q=                      who can be chosen for scope = people (store managers)
- *   POST /v1/calendar/events                         create (type = event | task | reminder)
+ *   POST /v1/calendar/events                         create a plain event or a reminder
+ *   POST /v1/calendar/tasks                          create a task (its own route: pizzasys guards it)
  *   GET  /v1/calendar/events/{id}                    details
  *   POST /v1/calendar/events/{id}/cancel             creator only (?stores= or ?users= for some only)
  *   POST /v1/calendar/tasks/{id}/{action}?stores=X   start | submit | approve | return, in store X
@@ -85,7 +86,29 @@ class CalendarEventController extends Controller
         ])->values()->all()]);
     }
 
+    /** POST /v1/calendar/events — a plain event or a reminder. A task goes to POST /v1/calendar/tasks. */
     public function store(Request $request): JsonResponse
+    {
+        if ($request->input('type') === 'task') {
+            // Refused, not quietly accepted: pizzasys guards tasks on their own route only.
+            throw ValidationException::withMessages(['type' => 'Create a task with POST /v1/calendar/tasks.']);
+        }
+
+        return $this->create($request);
+    }
+
+    /**
+     * POST /v1/calendar/tasks — a task: the same body as an event (`type` may be
+     * left out), the same answer. pizzasys decides who may (create calendar tasks).
+     */
+    public function storeTask(Request $request): JsonResponse
+    {
+        $request->merge(['type' => 'task']);
+
+        return $this->create($request);
+    }
+
+    private function create(Request $request): JsonResponse
     {
         $data = $request->validate([
             'type'        => ['required', Rule::in(CalendarEvent::TYPES)],
